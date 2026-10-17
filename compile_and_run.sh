@@ -1,8 +1,30 @@
 #!/bin/sh
-if [ $# -ne 1 ]; then
-    echo "Need a parameter of number of CPU cores to use."
+# Build the OpenSSL searcher and look for a vanity key.
+# Usage: ./compile_and_run.sh CORES UID [DAYS] [LEADING]
+# DAYS defaults to 250. LEADING defaults to 6.
+set -eu
+if [ "$#" -lt 2 ]; then
+    echo "usage: $0 CORES UID [DAYS] [LEADING]" >&2
     exit 1
 fi
-gcc -v -march=native -mtune=native -O3 -Ofast -pipe -fno-plt -fexceptions -ftree-vectorize -ftree-vectorizer-verbose=2 -Wformat -Werror=format-security -lcrypto accel/accel_openssl.c -o accel/accel_openssl \
-    && schedtool -D -n19 -e ./pgpgen.py -t$1 -o PGPKEYS -m 250 -a accel/accel_openssl
-
+cores=$1
+uid=$2
+days=${3:-250}
+leading=${4:-6}
+root=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+cd "$root"
+# shellcheck disable=SC2046
+gcc -O2 -Wall -Wextra -Werror $(pkg-config --cflags libcrypto) \
+    -o accel/accel_openssl accel/accel_openssl.c $(pkg-config --libs libcrypto)
+if [ -x "$root/.venv/bin/python" ]; then
+    py=$root/.venv/bin/python
+else
+    py=python3
+fi
+exec "$py" -m pgpgen \
+    -t "$cores" \
+    -u "$uid" \
+    -m "$days" \
+    -l "$leading" \
+    -o "$root/PGPKEYS" \
+    -a "$root/accel/accel_openssl"
