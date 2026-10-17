@@ -11,14 +11,16 @@ Each output file is a transferable secret key: one certify-only primary, one use
 ## Requirements
 
 - Python 3.9 or newer
-- [PyNaCl](https://pypi.org/project/PyNaCl/) and [Click](https://pypi.org/project/click/)
-- GCC and OpenSSL (`libcrypto`)
+- CMake 3.16 or newer, GCC, and OpenSSL (`libcrypto`)
 - GnuPG, if you want to import the result
 
 ```sh
 python3 -m venv .venv
-.venv/bin/pip install pynacl click
+.venv/bin/pip install -e '.[build]'
+cmake -S . -B build && cmake --build build
 ```
+
+`pip install -e '.[build]'` installs the `pgpgen` command and, when the system has no CMake, a CMake binary inside the virtualenv. `CMakeLists.txt` builds `build/pgpgen-accel`, the program that runs the SHA-1 scan. A `cmake` already on `PATH` is used in preference to the virtualenv copy.
 
 ## Run
 
@@ -26,20 +28,18 @@ python3 -m venv .venv
 ./compile_and_run.sh CORES 'Name <name@example.com>' [DAYS] [LEADING]
 ```
 
-`DAYS` is how far into the past the creation time may move. It defaults to 250. `LEADING` defaults to 6.
+`DAYS` is how far into the past the creation time may move. It defaults to 250. `LEADING` defaults to 6. The script configures CMake, builds `build/pgpgen-accel`, and starts the search.
 
-The same options are on the module. `--uid` is required.
+The same options are on the `pgpgen` command. `--uid` is required.
 
 ```sh
-gcc -O2 -Wall -Wextra -Werror $(pkg-config --cflags libcrypto) \
-    -o accel/accel_openssl accel/accel_openssl.c $(pkg-config --libs libcrypto)
-.venv/bin/python -m pgpgen \
+pgpgen \
     -t 8 \
     -u 'Name <name@example.com>' \
     -m 250 \
     -l 6 \
     -o PGPKEYS \
-    -a accel/accel_openssl
+    -a build/pgpgen-accel
 ```
 
 `-x` stops after the first written key. The program keeps going until you interrupt it.
@@ -52,12 +52,14 @@ The search program reads one request on stdin: the fingerprint preimage, the off
 .venv/bin/python tests/check.py
 ```
 
-That compiles the searcher, compares its SHA-1 with `hashlib`, asks it for the same hit hashlib found, imports a fixed test key into a temporary GnuPG home, and generates one key whose key id opens with three matching bytes.
+That builds `build/pgpgen-accel` with CMake, compares its SHA-1 with `hashlib`, asks it for the same hit hashlib found, imports a fixed test key into a temporary GnuPG home, and generates one key whose key id opens with three matching bytes.
 
 ## Layout
 
 - `pgpgen/` builds the OpenPGP packets and drives the search
 - `accel/accel_openssl.c` is the SHA-1 scan
-- `compile_and_run.sh` compiles that scan and starts a search
+- `CMakeLists.txt` builds that scan as `build/pgpgen-accel`
+- `pyproject.toml` packages the Python driver
+- `compile_and_run.sh` builds the scan and starts a search
 
 Generated keys under `PGPKEYS/`, `FOUND/`, and `FOUND_OLD/` stay out of git.

@@ -35,22 +35,24 @@ def require(condition: bool, message: str) -> None:
         raise SystemExit(message)
 
 
-def compile_accel(destination: Path) -> None:
-    cflags = subprocess.check_output(["pkg-config", "--cflags", "libcrypto"], text=True).split()
-    libs = subprocess.check_output(["pkg-config", "--libs", "libcrypto"], text=True).split()
-    command = [
-        "gcc",
-        "-O2",
-        "-Wall",
-        "-Wextra",
-        "-Werror",
-        *cflags,
-        "-o",
-        str(destination),
-        str(ROOT / "accel" / "accel_openssl.c"),
-        *libs,
-    ]
-    subprocess.run(command, check=True)
+def cmake_program() -> str:
+    found = shutil.which("cmake")
+    if found:
+        return found
+    bundled = ROOT / ".venv" / "bin" / "cmake"
+    if bundled.is_file():
+        return str(bundled)
+    raise SystemExit("cmake is not installed")
+
+
+def compile_accel() -> Path:
+    build = ROOT / "build"
+    cmake = cmake_program()
+    subprocess.run([cmake, "-S", str(ROOT), "-B", str(build)], check=True)
+    subprocess.run([cmake, "--build", str(build)], check=True)
+    binary = build / "pgpgen-accel"
+    require(binary.is_file(), "CMake did not produce build/pgpgen-accel")
+    return binary
 
 
 def gpg_import(home: Path, key_path: Path) -> str:
@@ -201,8 +203,7 @@ def main() -> None:
     if work.exists():
         shutil.rmtree(work)
     work.mkdir()
-    binary = work / "pgpgen-accel"
-    compile_accel(binary)
+    binary = compile_accel()
     test_sha1(binary)
     test_mpi_and_packet(work)
     test_search_agrees(binary)
