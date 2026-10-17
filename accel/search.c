@@ -16,7 +16,7 @@ static void write_be32(uint8_t out[4], uint32_t value) {
     out[3] = (uint8_t)value;
 }
 
-int pgpgen_sha1(const uint8_t *data, size_t len, uint8_t out[20]) {
+int imsovain_sha1(const uint8_t *data, size_t len, uint8_t out[20]) {
     unsigned int out_len = 0;
     if (out == NULL || (data == NULL && len != 0)) {
         return -1;
@@ -56,22 +56,22 @@ static int sha1_reuse(EVP_MD_CTX *ctx, const uint8_t *data, size_t len, uint8_t 
     return out_len == 20 ? 0 : -1;
 }
 
-static int filter_ok(const pgpgen_filter *filter) {
+static int filter_ok(const imsovain_filter *filter) {
     if (filter == NULL) {
         return 0;
     }
-    if (filter->kind == PGPGEN_FILTER_REPEAT) {
+    if (filter->kind == IMSOVAIN_FILTER_REPEAT) {
         return filter->leading >= 1 && filter->leading <= 8;
     }
-    return filter->kind == PGPGEN_FILTER_PREFIX && filter->count >= 1 &&
-           filter->count <= PGPGEN_FILTER_MAX;
+    return filter->kind == IMSOVAIN_FILTER_PREFIX && filter->count >= 1 &&
+           filter->count <= IMSOVAIN_FILTER_MAX;
 }
 
 /* stop_on_match: return the unix time, or -1 when the window misses.
    Otherwise return 0 after hashing the whole window. -2 is a hard failure.
 */
 static int64_t scan_times(const uint8_t *src, size_t len, size_t time_off,
-                          uint32_t max_iter, const pgpgen_filter *filter,
+                          uint32_t max_iter, const imsovain_filter *filter,
                           int stop_on_match, uint64_t *checked, uint64_t *matches) {
     if (checked != NULL) {
         *checked = 0;
@@ -113,7 +113,7 @@ static int64_t scan_times(const uint8_t *src, size_t len, size_t time_off,
         if (checked != NULL) {
             *checked = (uint64_t)i + 1;
         }
-        if (pgpgen_filter_match(hash, filter)) {
+        if (imsovain_filter_match(hash, filter)) {
             hits++;
             if (stop_on_match) {
                 found = (int64_t)stamp;
@@ -133,13 +133,13 @@ static int64_t scan_times(const uint8_t *src, size_t len, size_t time_off,
     return found;
 }
 
-int64_t pgpgen_search(const uint8_t *src, size_t len, size_t time_off,
-                      uint32_t max_iter, const pgpgen_filter *filter, uint64_t *checked) {
+int64_t imsovain_search(const uint8_t *src, size_t len, size_t time_off,
+                      uint32_t max_iter, const imsovain_filter *filter, uint64_t *checked) {
     return scan_times(src, len, time_off, max_iter, filter, 1, checked, NULL);
 }
 
-int pgpgen_scan(const uint8_t *src, size_t len, size_t time_off, uint32_t max_iter,
-                const pgpgen_filter *filter, uint64_t *checked, uint64_t *matches) {
+int imsovain_scan(const uint8_t *src, size_t len, size_t time_off, uint32_t max_iter,
+                const imsovain_filter *filter, uint64_t *checked, uint64_t *matches) {
     int64_t rc = scan_times(src, len, time_off, max_iter, filter, 0, checked, matches);
     return rc == -2 ? -2 : 0;
 }

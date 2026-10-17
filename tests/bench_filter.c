@@ -54,11 +54,11 @@ static uint8_t *load_file(const char *path, size_t *length) {
     return buf;
 }
 
-static pgpgen_filter load_filter(const char *path) {
+static imsovain_filter load_filter(const char *path) {
     size_t length = 0;
     uint8_t *blob = load_file(path, &length);
-    pgpgen_filter filter;
-    if (pgpgen_filter_parse(blob, length, &filter) != 0) {
+    imsovain_filter filter;
+    if (imsovain_filter_parse(blob, length, &filter) != 0) {
         die("filter blob is not valid");
     }
     free(blob);
@@ -96,8 +96,8 @@ static void key_id_hex(const uint8_t hash[20], char out[17]) {
     out[16] = '\0';
 }
 
-static void compile_regex(const pgpgen_filter *filter, regex_t *compiled, int first_only) {
-    if (filter->kind != PGPGEN_FILTER_PREFIX || filter->count < 1) {
+static void compile_regex(const imsovain_filter *filter, regex_t *compiled, int first_only) {
+    if (filter->kind != IMSOVAIN_FILTER_PREFIX || filter->count < 1) {
         die("regex bench needs a prefix filter");
     }
     uint8_t count = first_only ? 1 : filter->count;
@@ -163,7 +163,7 @@ static void regex_scan(const uint8_t *src, size_t len, uint32_t iters, const reg
         buf[6] = (uint8_t)(stamp >> 8);
         buf[7] = (uint8_t)stamp;
         uint8_t hash[20];
-        if (pgpgen_sha1(buf, len, hash) != 0) {
+        if (imsovain_sha1(buf, len, hash) != 0) {
             die("SHA-1 failed");
         }
         char hex[17];
@@ -180,7 +180,7 @@ static void regex_scan(const uint8_t *src, size_t len, uint32_t iters, const reg
     *hits = found;
 }
 
-static uint64_t bench_recompile(const pgpgen_filter *filter, uint32_t iters, uint64_t seed) {
+static uint64_t bench_recompile(const imsovain_filter *filter, uint32_t iters, uint64_t seed) {
     uint64_t state = seed;
     uint64_t hits = 0;
     for (uint32_t n = 0; n < iters; n++) {
@@ -201,7 +201,7 @@ static uint64_t bench_recompile(const pgpgen_filter *filter, uint32_t iters, uin
     return hits;
 }
 
-static uint64_t bench_match(const pgpgen_filter *filter, const regex_t *compiled, int use_regex,
+static uint64_t bench_match(const imsovain_filter *filter, const regex_t *compiled, int use_regex,
                             uint32_t iters, uint64_t seed) {
     uint64_t state = seed;
     uint64_t hits = 0;
@@ -217,30 +217,30 @@ static uint64_t bench_match(const pgpgen_filter *filter, const regex_t *compiled
             } else if (rc != REG_NOMATCH) {
                 die("regexec failed");
             }
-        } else if (pgpgen_filter_match(hash, filter)) {
+        } else if (imsovain_filter_match(hash, filter)) {
             hits++;
         }
     }
     return hits;
 }
 
-static void expect_byte(const pgpgen_filter *filter, const uint8_t key[8], int want) {
+static void expect_byte(const imsovain_filter *filter, const uint8_t key[8], int want) {
     uint8_t hash[20];
     memset(hash, 0x5a, sizeof hash);
     memcpy(hash + 12, key, 8);
-    if (pgpgen_filter_match(hash, filter) != want) {
+    if (imsovain_filter_match(hash, filter) != want) {
         die("byte filter self-check failed");
     }
 }
 
-static void expect_match(const pgpgen_filter *filter, const regex_t *compiled, const uint8_t key[8],
+static void expect_match(const imsovain_filter *filter, const regex_t *compiled, const uint8_t key[8],
                          int want) {
     uint8_t hash[20];
     memset(hash, 0x5a, sizeof hash);
     memcpy(hash + 12, key, 8);
     char hex[17];
     key_id_hex(hash, hex);
-    int byte_hit = pgpgen_filter_match(hash, filter);
+    int byte_hit = imsovain_filter_match(hash, filter);
     int regex_hit = regexec(compiled, hex, 0, NULL, 0) == 0;
     if (byte_hit != want || regex_hit != want) {
         fprintf(stderr, "bench_filter: self-check failed for %s byte=%d regex=%d want=%d\n", hex,
@@ -256,11 +256,11 @@ static void report(const char *kind, const char *name, uint64_t count, double se
 }
 
 static void time_byte_scan(const char *name, const uint8_t *preimage, size_t len,
-                           const pgpgen_filter *filter, uint32_t iters) {
+                           const imsovain_filter *filter, uint32_t iters) {
     uint64_t checked = 0;
     uint64_t hits = 0;
     double start = now_seconds();
-    int rc = pgpgen_scan(preimage, len, 4, iters, filter, &checked, &hits);
+    int rc = imsovain_scan(preimage, len, 4, iters, filter, &checked, &hits);
     double elapsed = now_seconds() - start;
     if (rc != 0 || checked != iters) {
         die("byte scan did not finish the requested window");
@@ -282,10 +282,10 @@ int main(int argc, char **argv) {
         die("preimage is too short");
     }
     clamp_limit(preimage, len, iters);
-    pgpgen_filter repeat_filter = load_filter(argv[2]);
-    pgpgen_filter word_filter = load_filter(argv[3]);
-    pgpgen_filter run_filter = load_filter(argv[4]);
-    pgpgen_filter one_filter = load_filter(argv[5]);
+    imsovain_filter repeat_filter = load_filter(argv[2]);
+    imsovain_filter word_filter = load_filter(argv[3]);
+    imsovain_filter run_filter = load_filter(argv[4]);
+    imsovain_filter one_filter = load_filter(argv[5]);
 
     regex_t word_re;
     regex_t one_re;

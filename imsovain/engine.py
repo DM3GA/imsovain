@@ -6,14 +6,14 @@ import os
 import time
 from dataclasses import dataclass
 
-from pgpgen.accel_proc import TIME_OFFSET, search
-from pgpgen.packets import (
+from imsovain.accel_proc import TIME_OFFSET, search
+from imsovain.packets import (
     Ed25519Key,
     SecretKeyPacket,
     format_fingerprint,
     transferable_secret_key,
 )
-from pgpgen.pattern import Filter, key_id_matches
+from imsovain.pattern import Filter, key_id_matches
 
 SECONDS_PER_DAY = 24 * 60 * 60
 

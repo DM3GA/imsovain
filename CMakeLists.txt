@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.15...3.30)
 
 if(NOT DEFINED SKBUILD_PROJECT_NAME)
-    set(SKBUILD_PROJECT_NAME pgpgen)
+    set(SKBUILD_PROJECT_NAME imsovain)
 endif()
 
 project(${SKBUILD_PROJECT_NAME} LANGUAGES C)
@@ -24,4 +24,4 @@ target_link_libraries(_accel PRIVATE OpenSSL::Crypto Threads::Threads ${CMAKE_DL
 target_compile_definitions(_accel PRIVATE _GNU_SOURCE)
 target_compile_options(_accel PRIVATE -Wall -Wextra -Werror)
 
-install(TARGETS _accel DESTINATION pgpgen)
+install(TARGETS _accel DESTINATION imsovain)

@@ -9,9 +9,9 @@ from concurrent.futures import ThreadPoolExecutor
 
 import click
 
-from pgpgen.engine import attempt_key, window_seconds
-from pgpgen.packets import user_id_bytes
-from pgpgen.pattern import describe, parse_filter
+from imsovain.engine import attempt_key, window_seconds
+from imsovain.packets import user_id_bytes
+from imsovain.pattern import describe, parse_filter
 
 
 def _report(result) -> None:
@@ -106,7 +106,7 @@ def main(
     os.makedirs(outdir, exist_ok=True)
     max_iter = window_seconds(max_time_days)
     if opencl:
-        from pgpgen.accel_proc import opencl_device
+        from imsovain.accel_proc import opencl_device
 
         try:
             device = opencl_device()

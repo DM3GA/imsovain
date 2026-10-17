@@ -1,6 +1,6 @@
 """In-process SHA-1 search.
 
-`pgpgen._accel` is the extension built by CMake. The CPU search releases
+`imsovain._accel` is the extension built by CMake. The CPU search releases
 the GIL, so several Python threads can hash at the same time. The OpenCL
 search also releases the GIL. One GPU runs one scan at a time, and that
 scan hashes the whole window instead of stopping at the first hit.
@@ -14,10 +14,10 @@ TIME_OFFSET = 4
 
 def _accel():
     try:
-        from pgpgen import _accel as native
+        from imsovain import _accel as native
     except ImportError as exc:
         raise RuntimeError(
-            "pgpgen._accel is not built. From the repository root, run: pip install -e ."
+            "imsovain._accel is not built. From the repository root, run: pip install -e ."
         ) from exc
     return native
 

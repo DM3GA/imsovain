@@ -1,6 +1,6 @@
-# pgpgen
+# imsovain
 
-`pgpgen` generates an unencrypted OpenPGP v4 Ed25519 secret key whose key id opens with a chosen pattern.
+`imsovain` generates an unencrypted OpenPGP v4 Ed25519 secret key whose key id opens with a chosen pattern.
 
 A v4 fingerprint is SHA-1 of the public key packet body, with a two-octet length prefix. That hash includes the key's creation time. The program keeps the Ed25519 key fixed and walks the creation time backward from now, one second at a time, until the key id matches. SHA-1 is here because [RFC 4880](https://www.rfc-editor.org/rfc/rfc4880) defines the v4 fingerprint that way.
 
@@ -32,7 +32,7 @@ Each output file is a transferable secret key: one certify-only primary, one use
 - GnuPG, if you want to import the result
 - An OpenCL GPU and `libOpenCL.so.1`, only if you pass `--opencl`
 
-`pip install` builds a Python extension from `accel/search.c` with scikit-build-core and CMake. The build downloads CMake if the environment does not already have it. The scan then runs inside the `pgpgen` process.
+`pip install` builds a Python extension from `accel/search.c` with scikit-build-core and CMake. The build downloads CMake if the environment does not already have it. The scan then runs inside the `imsovain` process.
 
 ```sh
 python3 -m venv .venv
@@ -47,10 +47,10 @@ python3 -m venv .venv
 
 `DAYS` is how far into the past the creation time may move. It defaults to 250. `LEADING` defaults to 6. `FILTER` defaults to `repeat`. Pass `opencl` as the sixth argument to hash on the GPU. The script installs the package, which compiles the extension, and starts the search.
 
-The same options are on the `pgpgen` command. `--uid` is required.
+The same options are on the `imsovain` command. `--uid` is required.
 
 ```sh
-pgpgen \
+imsovain \
     -t 8 \
     -u 'Name <name@example.com>' \
     -m 250 \
@@ -62,7 +62,7 @@ pgpgen \
 The same search on the GPU:
 
 ```sh
-pgpgen \
+imsovain \
     -t 8 \
     -u 'Name <name@example.com>' \
     --opencl \
@@ -72,7 +72,7 @@ pgpgen \
 
 `-f run` looks for `00112233` and the other counts. `-f C0DE` looks for that prefix alone. `-f repeat` is the doubled-nibble search.
 
-`-x` stops after the first written key. The program keeps going until you interrupt it. Threads share the process. Each CPU scan keeps its own SHA-1 context and releases the GIL while it hashes. `pgpgen` checks a returned timestamp with its own SHA-1 before it writes the key.
+`-x` stops after the first written key. The program keeps going until you interrupt it. Threads share the process. Each CPU scan keeps its own SHA-1 context and releases the GIL while it hashes. `imsovain` checks a returned timestamp with its own SHA-1 before it writes the key.
 
 ## Check
 
@@ -84,11 +84,11 @@ That builds the extension, compares its SHA-1 with `hashlib`, asks the CPU and t
 
 ## Layout
 
-- `pgpgen/` builds the OpenPGP packets and drives the search
+- `imsovain/` builds the OpenPGP packets and drives the search
 - `accel/search.c` is the CPU SHA-1 scan
 - `accel/opencl.c` is the same scan on an OpenCL GPU
 - `accel/filter.c` matches key-id prefixes without a regex
-- `accel/module.c` exposes both scans as `pgpgen._accel`
+- `accel/module.c` exposes both scans as `imsovain._accel`
 - `CMakeLists.txt` and `pyproject.toml` build the extension
 - `compile_and_run.sh` installs the package and starts a search
 

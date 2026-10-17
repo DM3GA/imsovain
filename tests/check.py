@@ -14,8 +14,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
-UID = "pgpgen test <pgpgen-test@example.com>"
-LONG_UID = ("pgpgen " + ("A" * 300) + " <long-user@example.com>")
+UID = "imsovain test <imsovain-test@example.com>"
+LONG_UID = ("imsovain " + ("A" * 300) + " <long-user@example.com>")
 
 
 def require(condition: bool, message: str) -> None:
@@ -64,11 +64,11 @@ def gpg_import(home: Path, key_path: Path) -> str:
 
 
 def test_sha1() -> None:
-    from pgpgen.accel_proc import sha1_digest
-    from pgpgen.packets import Ed25519Key, SecretKeyPacket
+    from imsovain.accel_proc import sha1_digest
+    from imsovain.packets import Ed25519Key, SecretKeyPacket
 
-    expected = hashlib.sha1(b"pgpgen-sha1-selftest").digest()
-    require(sha1_digest(b"pgpgen-sha1-selftest") == expected, "OpenSSL SHA-1 disagrees with hashlib")
+    expected = hashlib.sha1(b"imsovain-sha1-selftest").digest()
+    require(sha1_digest(b"imsovain-sha1-selftest") == expected, "OpenSSL SHA-1 disagrees with hashlib")
     key = Ed25519Key(bytes(range(32)))
     for created in (1_700_000_000, 1_700_000_123, int(time.time())):
         preimage = SecretKeyPacket(key, created).fingerprint_preimage()
@@ -77,7 +77,7 @@ def test_sha1() -> None:
 
 
 def test_mpi_and_packet(work: Path) -> None:
-    from pgpgen.packets import Ed25519Key, SecretKeyPacket, mpi_encode, transferable_secret_key
+    from imsovain.packets import Ed25519Key, SecretKeyPacket, mpi_encode, transferable_secret_key
 
     point = b"\x40" + bytes(range(32))
     encoded = mpi_encode(point)
@@ -120,8 +120,8 @@ def fingerprint_with_key_id(key_id: bytes) -> bytes:
 
 
 def test_filters() -> None:
-    from pgpgen.accel_proc import native_match
-    from pgpgen.pattern import parse_filter
+    from imsovain.accel_proc import native_match
+    from imsovain.pattern import parse_filter
 
     repeat6 = parse_filter("repeat", 6)
     repeat3 = parse_filter("repeat", 3)
@@ -180,7 +180,7 @@ def test_filters() -> None:
 
 
 def find_with_hashlib(filt, limit: int):
-    from pgpgen.packets import Ed25519Key, SecretKeyPacket
+    from imsovain.packets import Ed25519Key, SecretKeyPacket
 
     key = Ed25519Key(os.urandom(32))
     start = int(time.time())
@@ -197,8 +197,8 @@ def find_with_hashlib(filt, limit: int):
 
 
 def assert_search_agrees(filt, found_at: int, key, start: int) -> None:
-    from pgpgen.accel_proc import search
-    from pgpgen.packets import SecretKeyPacket
+    from imsovain.accel_proc import search
+    from imsovain.packets import SecretKeyPacket
 
     original = SecretKeyPacket(key, start).fingerprint_preimage()
     found, checked = search(original, found_at + 1, filt)
@@ -210,8 +210,8 @@ def assert_search_agrees(filt, found_at: int, key, start: int) -> None:
 
 
 def assert_opencl_agrees(filt, found_at: int, key, start: int) -> None:
-    from pgpgen.accel_proc import search
-    from pgpgen.packets import SecretKeyPacket
+    from imsovain.accel_proc import search
+    from imsovain.packets import SecretKeyPacket
 
     original = SecretKeyPacket(key, start).fingerprint_preimage()
     found, checked = search(original, found_at + 1, filt, opencl=True)
@@ -224,9 +224,9 @@ def assert_opencl_agrees(filt, found_at: int, key, start: int) -> None:
 
 
 def test_opencl() -> None:
-    from pgpgen.accel_proc import opencl_device, search
-    from pgpgen.packets import Ed25519Key, SecretKeyPacket
-    from pgpgen.pattern import parse_filter
+    from imsovain.accel_proc import opencl_device, search
+    from imsovain.packets import Ed25519Key, SecretKeyPacket
+    from imsovain.pattern import parse_filter
 
     print(f"opencl device {opencl_device()}")
     for _ in range(8):
@@ -266,7 +266,7 @@ def test_cli_opencl(work: Path) -> None:
     command = [
         sys.executable,
         "-m",
-        "pgpgen",
+        "imsovain",
         "-t",
         "4",
         "-m",
@@ -296,7 +296,7 @@ def test_cli_opencl(work: Path) -> None:
 
 
 def test_search_agrees() -> None:
-    from pgpgen.pattern import parse_filter
+    from imsovain.pattern import parse_filter
 
     repeat3 = parse_filter("repeat", 3)
     key, start, found_at = find_with_hashlib(repeat3, 2_000_000)
@@ -311,7 +311,7 @@ def test_cli_filter(work: Path) -> None:
     command = [
         sys.executable,
         "-m",
-        "pgpgen",
+        "imsovain",
         "-t",
         "4",
         "-m",
@@ -342,7 +342,7 @@ def test_cli_filter(work: Path) -> None:
 
 def test_help() -> None:
     completed = subprocess.run(
-        [sys.executable, "-m", "pgpgen", "--help"],
+        [sys.executable, "-m", "imsovain", "--help"],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -355,8 +355,8 @@ def test_help() -> None:
 
 
 def test_bench(work: Path) -> None:
-    from pgpgen.packets import Ed25519Key, SecretKeyPacket
-    from pgpgen.pattern import parse_filter
+    from imsovain.packets import Ed25519Key, SecretKeyPacket
+    from imsovain.pattern import parse_filter
 
     preimage = SecretKeyPacket(Ed25519Key(os.urandom(32)), int(time.time())).fingerprint_preimage()
     blobs = {
@@ -463,7 +463,7 @@ def test_cli_key(work: Path) -> None:
     command = [
         sys.executable,
         "-m",
-        "pgpgen",
+        "imsovain",
         "-t",
         "4",
         "-m",
@@ -493,14 +493,14 @@ def test_cli_key(work: Path) -> None:
 
 def main() -> None:
     # pip's editable hook is loaded at interpreter startup. Build first, then
-    # re-exec so this process can import pgpgen._accel.
-    if os.environ.get("PGPGEN_CHECKS") != "1":
+    # re-exec so this process can import imsovain._accel.
+    if os.environ.get("IMSOVAIN_CHECKS") != "1":
         build_extension()
         env = os.environ.copy()
-        env["PGPGEN_CHECKS"] = "1"
+        env["IMSOVAIN_CHECKS"] = "1"
         os.execve(sys.executable, [sys.executable, str(ROOT / "tests" / "check.py")], env)
 
-    from pgpgen.engine import window_seconds
+    from imsovain.engine import window_seconds
 
     work = ROOT / "testrun"
     if work.exists():

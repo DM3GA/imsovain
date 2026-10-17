@@ -211,7 +211,7 @@ static const char KERNEL[] =
     "    return (h3 >> shift) == (hi >> shift);\n"
     "}\n"
     "\n"
-    "__kernel void pgpgen_sha1_self(__constant uint *words, __global uint *out) {\n"
+    "__kernel void imsovain_sha1_self(__constant uint *words, __global uint *out) {\n"
     "    if (get_global_id(0) != 0) return;\n"
     "    uint4 w[16];\n"
     "    for (int i = 0; i < 16; i++) w[i] = (uint4)(words[i]);\n"
@@ -225,7 +225,7 @@ static const char KERNEL[] =
     "              h4.s0 == h4.s1 && h4.s0 == h4.s2 && h4.s0 == h4.s3) ? 0u : 1u;\n"
     "}\n"
     "\n"
-    "__kernel void pgpgen_scan(\n"
+    "__kernel void imsovain_scan(\n"
     "    __constant uint *words,\n"
     "    uint limit,\n"
     "    uint kind,\n"
@@ -433,7 +433,7 @@ static int self_test_message(const uint8_t *msg, size_t len, const char *label) 
     uint32_t got[6];
     uint8_t expect[20];
     cl_int err = 0;
-    if (load_words(msg, len, words) != 0 || pgpgen_sha1(msg, len, expect) != 0) {
+    if (load_words(msg, len, words) != 0 || imsovain_sha1(msg, len, expect) != 0) {
         fail_init("OpenCL SHA-1 self-test could not pad the block");
         return -1;
     }
@@ -667,8 +667,8 @@ static int init_gpu(void) {
 
     cl_int self_err = 0;
     cl_int scan_err = 0;
-    cl_kernel self = ocl.CreateKernel(program, "pgpgen_sha1_self", &self_err);
-    cl_kernel scan = ocl.CreateKernel(program, "pgpgen_scan", &scan_err);
+    cl_kernel self = ocl.CreateKernel(program, "imsovain_sha1_self", &self_err);
+    cl_kernel scan = ocl.CreateKernel(program, "imsovain_scan", &scan_err);
     if (self == NULL || scan == NULL) {
         if (self != NULL) {
             ocl.ReleaseKernel(self);
@@ -696,9 +696,9 @@ static int init_gpu(void) {
     gpu.units = units;
 
     gpu.words = make_buffer(CL_MEM_READ_ONLY, 16u * sizeof(uint32_t));
-    gpu.prefix_len = make_buffer(CL_MEM_READ_ONLY, PGPGEN_FILTER_MAX * sizeof(uint32_t));
-    gpu.prefix_hi = make_buffer(CL_MEM_READ_ONLY, PGPGEN_FILTER_MAX * sizeof(uint32_t));
-    gpu.prefix_lo = make_buffer(CL_MEM_READ_ONLY, PGPGEN_FILTER_MAX * sizeof(uint32_t));
+    gpu.prefix_len = make_buffer(CL_MEM_READ_ONLY, IMSOVAIN_FILTER_MAX * sizeof(uint32_t));
+    gpu.prefix_hi = make_buffer(CL_MEM_READ_ONLY, IMSOVAIN_FILTER_MAX * sizeof(uint32_t));
+    gpu.prefix_lo = make_buffer(CL_MEM_READ_ONLY, IMSOVAIN_FILTER_MAX * sizeof(uint32_t));
     gpu.hit = make_buffer(CL_MEM_READ_WRITE, sizeof(uint32_t));
     if (gpu.words == NULL || gpu.prefix_len == NULL || gpu.prefix_hi == NULL || gpu.prefix_lo == NULL ||
         gpu.hit == NULL) {
@@ -739,14 +739,14 @@ static int ensure_gpu(void) {
     return 0;
 }
 
-static int filter_ok(const pgpgen_filter *filter) {
+static int filter_ok(const imsovain_filter *filter) {
     if (filter == NULL) {
         return 0;
     }
-    if (filter->kind == PGPGEN_FILTER_REPEAT) {
+    if (filter->kind == IMSOVAIN_FILTER_REPEAT) {
         return filter->leading >= 1 && filter->leading <= 8;
     }
-    return filter->kind == PGPGEN_FILTER_PREFIX && filter->count >= 1 && filter->count <= PGPGEN_FILTER_MAX;
+    return filter->kind == IMSOVAIN_FILTER_PREFIX && filter->count >= 1 && filter->count <= IMSOVAIN_FILTER_MAX;
 }
 
 static size_t launch_threads(uint32_t limit) {
@@ -768,7 +768,7 @@ static size_t launch_threads(uint32_t limit) {
     return global;
 }
 
-static int64_t launch_scan(const uint8_t *src, size_t len, uint32_t max_iter, const pgpgen_filter *filter,
+static int64_t launch_scan(const uint8_t *src, size_t len, uint32_t max_iter, const imsovain_filter *filter,
                            uint64_t *checked) {
     if (len >= 56) {
         copy_error("OpenCL search hashes one SHA-1 block, and this preimage is longer than 55 bytes");
@@ -791,14 +791,14 @@ static int64_t launch_scan(const uint8_t *src, size_t len, uint32_t max_iter, co
         limit = room > 0xffffffffu ? 0xffffffffu : (uint32_t)room;
     }
 
-    uint32_t plen[PGPGEN_FILTER_MAX];
-    uint32_t phi[PGPGEN_FILTER_MAX];
-    uint32_t plo[PGPGEN_FILTER_MAX];
+    uint32_t plen[IMSOVAIN_FILTER_MAX];
+    uint32_t phi[IMSOVAIN_FILTER_MAX];
+    uint32_t plo[IMSOVAIN_FILTER_MAX];
     memset(plen, 0, sizeof plen);
     memset(phi, 0, sizeof phi);
     memset(plo, 0, sizeof plo);
     uint32_t prefix_count = 0;
-    if (filter->kind == PGPGEN_FILTER_PREFIX) {
+    if (filter->kind == IMSOVAIN_FILTER_PREFIX) {
         prefix_count = filter->count;
         for (uint32_t i = 0; i < prefix_count; i++) {
             plen[i] = filter->len[i];
@@ -854,8 +854,8 @@ static int64_t launch_scan(const uint8_t *src, size_t len, uint32_t max_iter, co
     return (int64_t)(start - hit);
 }
 
-int64_t pgpgen_opencl_search(const uint8_t *src, size_t len, size_t time_off, uint32_t max_iter,
-                             const pgpgen_filter *filter, uint64_t *checked) {
+int64_t imsovain_opencl_search(const uint8_t *src, size_t len, size_t time_off, uint32_t max_iter,
+                             const imsovain_filter *filter, uint64_t *checked) {
     if (checked != NULL) {
         *checked = 0;
     }
@@ -873,7 +873,7 @@ int64_t pgpgen_opencl_search(const uint8_t *src, size_t len, size_t time_off, ui
     return found;
 }
 
-int pgpgen_opencl_device(char *buf, size_t buflen) {
+int imsovain_opencl_device(char *buf, size_t buflen) {
     if (buf == NULL || buflen < 2) {
         copy_error("OpenCL device name buffer is too small");
         return -1;
@@ -893,14 +893,14 @@ int pgpgen_opencl_device(char *buf, size_t buflen) {
     return 0;
 }
 
-const char *pgpgen_opencl_last_error(void) {
+const char *imsovain_opencl_last_error(void) {
     if (thread_error[0] == '\0') {
         return "OpenCL search failed";
     }
     return thread_error;
 }
 
-__attribute__((destructor)) static void pgpgen_opencl_shutdown(void) {
+__attribute__((destructor)) static void imsovain_opencl_shutdown(void) {
     pthread_mutex_lock(&gpu_lock);
     release_gpu();
     gpu.ready = 0;

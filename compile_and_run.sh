@@ -40,4 +40,4 @@ set -- \
 if [ -n "$gpu" ]; then
     set -- "$@" --opencl
 fi
-exec "$py" -m pgpgen "$@"
+exec "$py" -m imsovain "$@"

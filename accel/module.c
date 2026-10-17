@@ -16,7 +16,7 @@ static PyObject *py_sha1(PyObject *self, PyObject *args) {
     }
     uint8_t hash[20];
     const uint8_t *data = view.buf == NULL ? (const uint8_t *)"" : view.buf;
-    int rc = pgpgen_sha1(data, (size_t)view.len, hash);
+    int rc = imsovain_sha1(data, (size_t)view.len, hash);
     PyBuffer_Release(&view);
     if (rc != 0) {
         PyErr_SetString(PyExc_RuntimeError, "SHA-1 digest failed");
@@ -39,9 +39,9 @@ static PyObject *run_search(PyObject *args, int use_opencl) {
         PyErr_SetString(PyExc_ValueError, "search arguments are out of range");
         return NULL;
     }
-    pgpgen_filter filter;
+    imsovain_filter filter;
     const uint8_t *blob_bytes = blob.buf == NULL ? (const uint8_t *)"" : blob.buf;
-    if (pgpgen_filter_parse(blob_bytes, (size_t)blob.len, &filter) != 0) {
+    if (imsovain_filter_parse(blob_bytes, (size_t)blob.len, &filter) != 0) {
         PyBuffer_Release(&view);
         PyBuffer_Release(&blob);
         PyErr_SetString(PyExc_ValueError, "filter is not valid");
@@ -65,15 +65,15 @@ static PyObject *run_search(PyObject *args, int use_opencl) {
     int64_t found = 0;
     Py_BEGIN_ALLOW_THREADS
     if (use_opencl) {
-        found = pgpgen_opencl_search(copy, len, (size_t)time_off, (uint32_t)max_iter, &filter, &checked);
+        found = imsovain_opencl_search(copy, len, (size_t)time_off, (uint32_t)max_iter, &filter, &checked);
     } else {
-        found = pgpgen_search(copy, len, (size_t)time_off, (uint32_t)max_iter, &filter, &checked);
+        found = imsovain_search(copy, len, (size_t)time_off, (uint32_t)max_iter, &filter, &checked);
     }
     Py_END_ALLOW_THREADS
     free(copy);
 
     if (found == -2) {
-        const char *message = use_opencl ? pgpgen_opencl_last_error() : "SHA-1 search failed";
+        const char *message = use_opencl ? imsovain_opencl_last_error() : "SHA-1 search failed";
         PyErr_SetString(PyExc_RuntimeError, message);
         return NULL;
     }
@@ -105,8 +105,8 @@ static PyObject *py_opencl_device(PyObject *self, PyObject *unused) {
     char name[256];
     (void)self;
     (void)unused;
-    if (pgpgen_opencl_device(name, sizeof name) != 0) {
-        PyErr_SetString(PyExc_RuntimeError, pgpgen_opencl_last_error());
+    if (imsovain_opencl_device(name, sizeof name) != 0) {
+        PyErr_SetString(PyExc_RuntimeError, imsovain_opencl_last_error());
         return NULL;
     }
     return PyUnicode_FromString(name);
@@ -125,12 +125,12 @@ static PyObject *py_match(PyObject *self, PyObject *args) {
         PyErr_SetString(PyExc_ValueError, "a v4 fingerprint is 20 bytes");
         return NULL;
     }
-    pgpgen_filter filter;
+    imsovain_filter filter;
     const uint8_t *blob_bytes = blob.buf == NULL ? (const uint8_t *)"" : blob.buf;
-    int parsed = pgpgen_filter_parse(blob_bytes, (size_t)blob.len, &filter);
+    int parsed = imsovain_filter_parse(blob_bytes, (size_t)blob.len, &filter);
     int matched = 0;
     if (parsed == 0) {
-        matched = pgpgen_filter_match(digest.buf, &filter);
+        matched = imsovain_filter_match(digest.buf, &filter);
     }
     PyBuffer_Release(&digest);
     PyBuffer_Release(&blob);

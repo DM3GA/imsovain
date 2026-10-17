@@ -3,7 +3,7 @@ requires = ["scikit-build-core>=0.10"]
 build-backend = "scikit_build_core.build"
 
 [project]
-name = "pgpgen"
+name = "imsovain"
 version = "0.1.0"
 description = "Vanity OpenPGP v4 Ed25519 key generator"
 readme = "README.md"
@@ -14,9 +14,9 @@ dependencies = [
 ]
 
 [project.scripts]
-pgpgen = "pgpgen.cli:main"
+imsovain = "imsovain.cli:main"
 
 [tool.scikit-build]
 minimum-version = "0.10"
-wheel.packages = ["pgpgen"]
+wheel.packages = ["imsovain"]
 build-dir = "build/{wheel_tag}"

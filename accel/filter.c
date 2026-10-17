@@ -2,7 +2,7 @@
 
 #include <string.h>
 
-int pgpgen_filter_parse(const uint8_t *blob, size_t len, pgpgen_filter *out) {
+int imsovain_filter_parse(const uint8_t *blob, size_t len, imsovain_filter *out) {
     if (blob == NULL || out == NULL || len < 4) {
         return -1;
     }
@@ -16,7 +16,7 @@ int pgpgen_filter_parse(const uint8_t *blob, size_t len, pgpgen_filter *out) {
     if (blob[3] != 0) {
         return -1;
     }
-    if (kind == PGPGEN_FILTER_REPEAT) {
+    if (kind == IMSOVAIN_FILTER_REPEAT) {
         if (leading < 1 || leading > 8 || count != 0 || len != 4) {
             return -1;
         }
@@ -24,7 +24,7 @@ int pgpgen_filter_parse(const uint8_t *blob, size_t len, pgpgen_filter *out) {
         out->leading = leading;
         return 0;
     }
-    if (kind != PGPGEN_FILTER_PREFIX || count < 1 || count > PGPGEN_FILTER_MAX) {
+    if (kind != IMSOVAIN_FILTER_PREFIX || count < 1 || count > IMSOVAIN_FILTER_MAX) {
         return -1;
     }
     if (len != 4u + (size_t)count * 9u) {
@@ -49,12 +49,12 @@ int pgpgen_filter_parse(const uint8_t *blob, size_t len, pgpgen_filter *out) {
     return 0;
 }
 
-int pgpgen_filter_match(const uint8_t hash[20], const pgpgen_filter *filter) {
+int imsovain_filter_match(const uint8_t hash[20], const imsovain_filter *filter) {
     if (hash == NULL || filter == NULL) {
         return 0;
     }
     const uint8_t *key_id = hash + 12;
-    if (filter->kind == PGPGEN_FILTER_REPEAT) {
+    if (filter->kind == IMSOVAIN_FILTER_REPEAT) {
         uint8_t first = key_id[0];
         if ((first >> 4) != (first & 0x0f)) {
             return 0;
@@ -66,7 +66,7 @@ int pgpgen_filter_match(const uint8_t hash[20], const pgpgen_filter *filter) {
         }
         return 1;
     }
-    if (filter->kind != PGPGEN_FILTER_PREFIX) {
+    if (filter->kind != IMSOVAIN_FILTER_PREFIX) {
         return 0;
     }
 
