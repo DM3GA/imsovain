@@ -30,27 +30,30 @@ int pgpgen_sha1(const uint8_t *data, size_t len, uint8_t out[20]) {
     return out_len == 20 ? 0 : -1;
 }
 
-static int leading_match(const uint8_t hash[20], unsigned leading) {
-    const uint8_t *key_id = hash + 12;
-    uint8_t first = key_id[0];
-    if ((first >> 4) != (first & 0x0f)) {
+static int filter_ok(const pgpgen_filter *filter) {
+    if (filter == NULL) {
         return 0;
     }
-    for (unsigned i = 1; i < leading; i++) {
-        if (key_id[i] != first) {
-            return 0;
-        }
+    if (filter->kind == PGPGEN_FILTER_REPEAT) {
+        return filter->leading >= 1 && filter->leading <= 8;
     }
-    return 1;
+    return filter->kind == PGPGEN_FILTER_PREFIX && filter->count >= 1 &&
+           filter->count <= PGPGEN_FILTER_MAX;
 }
 
-int64_t pgpgen_search(const uint8_t *src, size_t len, size_t time_off,
-                      uint32_t max_iter, unsigned leading, uint64_t *checked) {
+/* stop_on_match: return the unix time, or -1 when the window misses.
+   Otherwise return 0 after hashing the whole window. -2 is a hard failure.
+*/
+static int64_t scan_times(const uint8_t *src, size_t len, size_t time_off,
+                          uint32_t max_iter, const pgpgen_filter *filter,
+                          int stop_on_match, uint64_t *checked, uint64_t *matches) {
     if (checked != NULL) {
         *checked = 0;
     }
-    if (src == NULL || len < 4 || time_off > len - 4 || max_iter == 0 ||
-        leading == 0 || leading > 8) {
+    if (matches != NULL) {
+        *matches = 0;
+    }
+    if (src == NULL || len < 4 || time_off > len - 4 || max_iter == 0 || !filter_ok(filter)) {
         return -2;
     }
 
@@ -62,6 +65,7 @@ int64_t pgpgen_search(const uint8_t *src, size_t len, size_t time_off,
 
     uint32_t start = read_be32(buf + time_off);
     int64_t found = -1;
+    uint64_t hits = 0;
     uint64_t room = (uint64_t)start + 1;
     uint32_t limit = max_iter;
     if ((uint64_t)limit > room) {
@@ -79,12 +83,32 @@ int64_t pgpgen_search(const uint8_t *src, size_t len, size_t time_off,
         if (checked != NULL) {
             *checked = (uint64_t)i + 1;
         }
-        if (leading_match(hash, leading)) {
-            found = (int64_t)stamp;
-            break;
+        if (pgpgen_filter_match(hash, filter)) {
+            hits++;
+            if (stop_on_match) {
+                found = (int64_t)stamp;
+                break;
+            }
         }
     }
 
+    if (matches != NULL) {
+        *matches = hits;
+    }
     free(buf);
+    if (!stop_on_match) {
+        return 0;
+    }
     return found;
+}
+
+int64_t pgpgen_search(const uint8_t *src, size_t len, size_t time_off,
+                      uint32_t max_iter, const pgpgen_filter *filter, uint64_t *checked) {
+    return scan_times(src, len, time_off, max_iter, filter, 1, checked, NULL);
+}
+
+int pgpgen_scan(const uint8_t *src, size_t len, size_t time_off, uint32_t max_iter,
+                const pgpgen_filter *filter, uint64_t *checked, uint64_t *matches) {
+    int64_t rc = scan_times(src, len, time_off, max_iter, filter, 0, checked, matches);
+    return rc == -2 ? -2 : 0;
 }

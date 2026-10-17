@@ -11,6 +11,7 @@ import click
 
 from pgpgen.engine import attempt_key, window_seconds
 from pgpgen.packets import user_id_bytes
+from pgpgen.pattern import describe, parse_filter
 
 
 def _report(result) -> None:
@@ -53,7 +54,19 @@ def _report(result) -> None:
     type=click.IntRange(1, 8),
     default=6,
     show_default=True,
-    help="Key id must open with this many identical doubled-nibble bytes.",
+    help="Repeat filter only: identical doubled-nibble bytes at the start of the key id.",
+)
+@click.option(
+    "--filter",
+    "-f",
+    "filter_name",
+    default="repeat",
+    show_default=True,
+    help=(
+        "Key-id filter. repeat uses --leading. run, word, speak, and short are "
+        "memorable prefixes (00112233, DEADBEEF, C0FFEE, C0DE, and their kin). "
+        "A hex string such as C0DE or 0x00112233 is one exact prefix."
+    ),
 )
 @click.option(
     "--uid",
@@ -73,15 +86,21 @@ def main(
     outdir: str,
     max_time_days: int,
     leading: int,
+    filter_name: str,
     uid: str,
     exit_after_found: bool,
 ) -> None:
     """Search creation timestamps until an Ed25519 fingerprint matches."""
     user_id_bytes(uid)
+    try:
+        filt = parse_filter(filter_name, leading)
+    except ValueError as exc:
+        raise click.BadParameter(str(exc), param_hint="--filter") from exc
     outdir = os.path.abspath(outdir)
     os.makedirs(outdir, exist_ok=True)
     max_iter = window_seconds(max_time_days)
-    worker_args = (outdir, uid, max_iter, leading)
+    print(f"filter {describe(filt)}", flush=True)
+    worker_args = (outdir, uid, max_iter, filt)
 
     with ThreadPoolExecutor(max_workers=threads) as pool:
         pending = set()

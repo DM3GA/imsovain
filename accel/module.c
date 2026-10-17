@@ -26,16 +26,25 @@ static PyObject *py_sha1(PyObject *self, PyObject *args) {
 
 static PyObject *py_search(PyObject *self, PyObject *args) {
     Py_buffer view;
+    Py_buffer blob;
     unsigned long time_off = 0;
     unsigned long max_iter = 0;
-    unsigned long leading = 0;
     (void)self;
-    if (!PyArg_ParseTuple(args, "y*kkk", &view, &time_off, &max_iter, &leading)) {
+    if (!PyArg_ParseTuple(args, "y*kky*", &view, &time_off, &max_iter, &blob)) {
         return NULL;
     }
-    if (max_iter > 0xfffffffful || leading > 8ul || time_off > (unsigned long)view.len) {
+    if (max_iter > 0xfffffffful || max_iter == 0 || time_off > (unsigned long)view.len) {
         PyBuffer_Release(&view);
+        PyBuffer_Release(&blob);
         PyErr_SetString(PyExc_ValueError, "search arguments are out of range");
+        return NULL;
+    }
+    pgpgen_filter filter;
+    const uint8_t *blob_bytes = blob.buf == NULL ? (const uint8_t *)"" : blob.buf;
+    if (pgpgen_filter_parse(blob_bytes, (size_t)blob.len, &filter) != 0) {
+        PyBuffer_Release(&view);
+        PyBuffer_Release(&blob);
+        PyErr_SetString(PyExc_ValueError, "filter is not valid");
         return NULL;
     }
 
@@ -43,18 +52,19 @@ static PyObject *py_search(PyObject *self, PyObject *args) {
     uint8_t *copy = malloc(len == 0 ? 1 : len);
     if (copy == NULL) {
         PyBuffer_Release(&view);
+        PyBuffer_Release(&blob);
         return PyErr_NoMemory();
     }
     if (len > 0 && view.buf != NULL) {
         memcpy(copy, view.buf, len);
     }
     PyBuffer_Release(&view);
+    PyBuffer_Release(&blob);
 
     uint64_t checked = 0;
     int64_t found = 0;
     Py_BEGIN_ALLOW_THREADS
-    found = pgpgen_search(copy, len, (size_t)time_off, (uint32_t)max_iter,
-                          (unsigned)leading, &checked);
+    found = pgpgen_search(copy, len, (size_t)time_off, (uint32_t)max_iter, &filter, &checked);
     Py_END_ALLOW_THREADS
     free(copy);
 
@@ -76,10 +86,43 @@ static PyObject *py_search(PyObject *self, PyObject *args) {
     return Py_BuildValue("NK", stamp, (unsigned long long)checked);
 }
 
+static PyObject *py_match(PyObject *self, PyObject *args) {
+    Py_buffer digest;
+    Py_buffer blob;
+    (void)self;
+    if (!PyArg_ParseTuple(args, "y*y*", &digest, &blob)) {
+        return NULL;
+    }
+    if (digest.len != 20 || digest.buf == NULL) {
+        PyBuffer_Release(&digest);
+        PyBuffer_Release(&blob);
+        PyErr_SetString(PyExc_ValueError, "a v4 fingerprint is 20 bytes");
+        return NULL;
+    }
+    pgpgen_filter filter;
+    const uint8_t *blob_bytes = blob.buf == NULL ? (const uint8_t *)"" : blob.buf;
+    int parsed = pgpgen_filter_parse(blob_bytes, (size_t)blob.len, &filter);
+    int matched = 0;
+    if (parsed == 0) {
+        matched = pgpgen_filter_match(digest.buf, &filter);
+    }
+    PyBuffer_Release(&digest);
+    PyBuffer_Release(&blob);
+    if (parsed != 0) {
+        PyErr_SetString(PyExc_ValueError, "filter is not valid");
+        return NULL;
+    }
+    if (matched) {
+        Py_RETURN_TRUE;
+    }
+    Py_RETURN_FALSE;
+}
+
 static PyMethodDef methods[] = {
     {"sha1", py_sha1, METH_VARARGS, "Return the SHA-1 digest of a byte string."},
     {"search", py_search, METH_VARARGS,
      "Search creation times. Returns (unix time or None, digests computed)."},
+    {"match", py_match, METH_VARARGS, "Return whether a fingerprint matches a packed filter."},
     {NULL, NULL, 0, NULL},
 };
 

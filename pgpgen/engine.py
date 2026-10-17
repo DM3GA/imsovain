@@ -13,7 +13,7 @@ from pgpgen.packets import (
     format_fingerprint,
     transferable_secret_key,
 )
-from pgpgen.pattern import key_id_matches
+from pgpgen.pattern import Filter, key_id_matches
 
 SECONDS_PER_DAY = 24 * 60 * 60
 
@@ -36,7 +36,7 @@ def window_seconds(days: int) -> int:
     return seconds
 
 
-def attempt_key(outdir: str, user_id: str, max_iter: int, leading: int) -> Attempt:
+def attempt_key(outdir: str, user_id: str, max_iter: int, filt: Filter) -> Attempt:
     started = time.perf_counter()
     key = Ed25519Key(os.urandom(32))
     created = int(time.time())
@@ -45,14 +45,14 @@ def attempt_key(outdir: str, user_id: str, max_iter: int, leading: int) -> Attem
     if preimage[TIME_OFFSET : TIME_OFFSET + 4] != created.to_bytes(4, "big"):
         raise RuntimeError("creation time is not at the expected fingerprint offset")
 
-    found, checked = search(preimage, max_iter, leading)
+    found, checked = search(preimage, max_iter, filt)
     elapsed = time.perf_counter() - started
     if found is None:
         return Attempt(checked=checked, seconds=elapsed)
 
     placed = SecretKeyPacket(key, found)
     fingerprint = placed.fingerprint()
-    if not key_id_matches(fingerprint, leading):
+    if not key_id_matches(fingerprint, filt):
         raise RuntimeError("search timestamp does not produce the requested key id")
 
     text = format_fingerprint(fingerprint)

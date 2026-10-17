@@ -114,31 +114,261 @@ def blob_index_of_uid(blob: bytes) -> int:
     return 2 + blob[1]
 
 
-def test_search_agrees() -> None:
-    from pgpgen.accel_proc import search
+def fingerprint_with_key_id(key_id: bytes) -> bytes:
+    require(len(key_id) == 8, "a key id is 8 bytes")
+    return b"\x11" * 12 + key_id
+
+
+def test_filters() -> None:
+    from pgpgen.accel_proc import native_match
+    from pgpgen.pattern import parse_filter
+
+    repeat6 = parse_filter("repeat", 6)
+    repeat3 = parse_filter("repeat", 3)
+    run = parse_filter("run")
+    word = parse_filter("word")
+    short = parse_filter("short")
+    code = parse_filter("code")
+    coffee = parse_filter("coffee")
+    counted = parse_filter("0x0011_2233")
+    require(parse_filter("C0 DE").prefixes == (bytes.fromhex("c0de"),), "hex spacing was not accepted")
+    for bad in ("nope", "ABC", "0xGG", "", "123"):
+        try:
+            parse_filter(bad)
+        except ValueError:
+            continue
+        raise SystemExit(f"filter {bad!r} should have been rejected")
+
+    vectors = (
+        (repeat6, bytes.fromhex("FFFFFFFFFFFF0000"), True),
+        (repeat6, bytes.fromhex("FFFFFFFFFF000000"), False),
+        (repeat3, bytes.fromhex("AAAAAA0011223344"), True),
+        (repeat3, bytes.fromhex("AAABAA0011223344"), False),
+        (run, bytes.fromhex("00112233AABBCCDD"), True),
+        (run, bytes.fromhex("01234567AABBCCDD"), True),
+        (run, bytes.fromhex("00112234AABBCCDD"), False),
+        (counted, bytes.fromhex("00112233AABBCCDD"), True),
+        (counted, bytes.fromhex("01234567AABBCCDD"), False),
+        (word, bytes.fromhex("DEADBEEF11223344"), True),
+        (word, bytes.fromhex("DEADC0DE00000000"), True),
+        (word, bytes.fromhex("DEADBE0011223344"), False),
+        (word, bytes.fromhex("C0DE000000000000"), False),
+        (short, bytes.fromhex("C0DE000000000000"), True),
+        (code, bytes.fromhex("C0DEFFFFFFFFFFFF"), True),
+        (code, bytes.fromhex("C0DF000000000000"), False),
+        (coffee, bytes.fromhex("C0FFEE0011223344"), True),
+        (coffee, bytes.fromhex("C0FFEF0011223344"), False),
+        (parse_filter("DEADBEEFCAFEBABE"), bytes.fromhex("DEADBEEFCAFEBABE"), True),
+        (parse_filter("DEADBEEFCAFEBABE"), bytes.fromhex("DEADBEEFCAFEBABF"), False),
+    )
+    for filt, key_id, want in vectors:
+        fingerprint = fingerprint_with_key_id(key_id)
+        require(filt.matches(fingerprint) is want, f"python filter {filt.name} on {key_id.hex()}")
+        require(native_match(fingerprint, filt) is want, f"C filter {filt.name} on {key_id.hex()}")
+        shifted = fingerprint_with_key_id(b"\x00" + key_id[:7])
+        if want and filt.kind == "prefix" and key_id[0] != 0:
+            require(not filt.matches(shifted), f"filter {filt.name} matched past the first byte")
+
+    for name in ("repeat", "run", "word", "speak", "short", "C0DE", "00112233"):
+        filt = parse_filter(name, 4)
+        for _ in range(200):
+            fingerprint = os.urandom(20)
+            require(
+                native_match(fingerprint, filt) is filt.matches(fingerprint),
+                f"C and python disagree on {name}",
+            )
+
+
+def find_with_hashlib(filt, limit: int):
     from pgpgen.packets import Ed25519Key, SecretKeyPacket
-    from pgpgen.pattern import key_id_matches
-    leading = 3
+
     key = Ed25519Key(os.urandom(32))
     start = int(time.time())
     preimage = bytearray(SecretKeyPacket(key, start).fingerprint_preimage())
     found_at = None
-    limit = 2_000_000
     for step in range(limit):
         stamp = start - step
         preimage[4:8] = stamp.to_bytes(4, "big")
-        digest = hashlib.sha1(preimage).digest()
-        if key_id_matches(digest, leading):
+        if filt.matches(hashlib.sha1(preimage).digest()):
             found_at = step
             break
-    require(found_at is not None, f"no 3-byte key id in {limit} hashlib attempts")
+    require(found_at is not None, f"no {filt.name} hit in {limit} hashlib attempts")
+    return key, start, found_at
+
+
+def assert_search_agrees(filt, found_at: int, key, start: int) -> None:
+    from pgpgen.accel_proc import search
+    from pgpgen.packets import SecretKeyPacket
+
     original = SecretKeyPacket(key, start).fingerprint_preimage()
-    found, checked = search(original, found_at + 1, leading)
+    found, checked = search(original, found_at + 1, filt)
     require(found == start - found_at, f"C search returned {found}, hashlib found offset {found_at}")
     require(checked == found_at + 1, f"C search counted {checked} attempts")
     if found_at > 0:
-        missed, _checked = search(original, found_at, leading)
+        missed, _checked = search(original, found_at, filt)
         require(missed is None, "C search matched earlier than hashlib")
+
+
+def test_search_agrees() -> None:
+    from pgpgen.pattern import parse_filter
+
+    repeat3 = parse_filter("repeat", 3)
+    key, start, found_at = find_with_hashlib(repeat3, 2_000_000)
+    assert_search_agrees(repeat3, found_at, key, start)
+    code = parse_filter("C0DE")
+    key, start, found_at = find_with_hashlib(code, 2_000_000)
+    assert_search_agrees(code, found_at, key, start)
+
+
+def test_cli_filter(work: Path) -> None:
+    outdir = work / "code-keys"
+    command = [
+        sys.executable,
+        "-m",
+        "pgpgen",
+        "-t",
+        "4",
+        "-m",
+        "2",
+        "-l",
+        "6",
+        "-f",
+        "C0DE",
+        "-u",
+        UID,
+        "-x",
+        "-o",
+        str(outdir),
+    ]
+    completed = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, check=False)
+    require(completed.returncode == 0, completed.stdout + completed.stderr)
+    require("filter c0de: C0DE" in completed.stdout, completed.stdout)
+    keys = sorted(outdir.iterdir())
+    require(len(keys) >= 1, "C0DE filter wrote no key")
+    for index, key_path in enumerate(keys):
+        require(stat.S_IMODE(key_path.stat().st_mode) == 0o600, "secret key was not mode 0600")
+        compact = key_path.name.replace("_", "")
+        require(compact[-16:-12] == "C0DE", f"key id does not open with C0DE: {key_path.name}")
+        listed = gpg_import(work / f"gnupg-code-{index}", key_path)
+        require(listed == compact, "saved filename does not match the GnuPG fingerprint")
+        print(f"verified {key_path.name}")
+
+
+def test_help() -> None:
+    completed = subprocess.run(
+        [sys.executable, "-m", "pgpgen", "--help"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    require(completed.returncode == 0, completed.stderr)
+    require("--filter" in completed.stdout and "00112233" in completed.stdout, completed.stdout)
+    require("C0DE" in completed.stdout, completed.stdout)
+
+
+def test_bench(work: Path) -> None:
+    from pgpgen.packets import Ed25519Key, SecretKeyPacket
+    from pgpgen.pattern import parse_filter
+
+    preimage = SecretKeyPacket(Ed25519Key(os.urandom(32)), int(time.time())).fingerprint_preimage()
+    blobs = {
+        "preimage": preimage,
+        "repeat": parse_filter("repeat", 6).pack(),
+        "word": parse_filter("word").pack(),
+        "run": parse_filter("run").pack(),
+        "one": parse_filter("DEADBEEF").pack(),
+    }
+    paths = {}
+    for name, blob in blobs.items():
+        path = work / f"{name}.blob"
+        path.write_bytes(blob)
+        paths[name] = path
+    binary = work / "bench_filter"
+    build = subprocess.run(
+        [
+            "gcc",
+            "-O3",
+            "-std=c11",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            "-D_GNU_SOURCE",
+            "-I",
+            str(ROOT / "accel"),
+            str(ROOT / "tests" / "bench_filter.c"),
+            str(ROOT / "accel" / "filter.c"),
+            str(ROOT / "accel" / "search.c"),
+            "-lcrypto",
+            "-o",
+            str(binary),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    require(build.returncode == 0, build.stderr or "filter benchmark failed to compile")
+    iters = "1000000"
+    completed = subprocess.run(
+        [
+            str(binary),
+            str(paths["preimage"]),
+            str(paths["repeat"]),
+            str(paths["word"]),
+            str(paths["run"]),
+            str(paths["one"]),
+            iters,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    require(completed.returncode == 0, completed.stderr or completed.stdout or "filter benchmark failed")
+    rows = {}
+    for line in completed.stdout.splitlines():
+        kind, name, count, seconds, rate, hits = line.split()
+        rows[(kind, name)] = (int(count), float(seconds), float(rate), int(hits))
+        print(f"{kind:12} {name:8} {float(rate):12.0f}/s  hits {hits}  in {float(seconds):.3f}s")
+    repeat_rate = rows[("byte_scan", "repeat")][2]
+    for name in ("word", "run", "one"):
+        rate = rows[("byte_scan", name)][2]
+        require(
+            rate >= repeat_rate * 0.75,
+            f"{name} scan ran at {rate:.0f}/s, repeat at {repeat_rate:.0f}/s",
+        )
+    byte_word = rows[("byte_match", "word")][2]
+    regex_word = rows[("regex_match", "word")][2]
+    byte_one = rows[("byte_match", "one")][2]
+    regex_one = rows[("regex_match", "one")][2]
+    require(
+        byte_word >= regex_word * 4,
+        f"word byte match {byte_word:.0f}/s is not 4x the regex {regex_word:.0f}/s",
+    )
+    require(
+        byte_one >= regex_one * 4,
+        f"single-prefix byte match {byte_one:.0f}/s is not 4x the regex {regex_one:.0f}/s",
+    )
+    recompile = rows[("regex_recompile", "word")][2]
+    require(
+        byte_word >= recompile * 20,
+        f"recompiling the regex each hash ran at {recompile:.0f}/s, byte match at {byte_word:.0f}/s",
+    )
+    require(
+        rows[("byte_scan", "word")][3] == rows[("regex_scan", "word")][3],
+        "word byte scan and regex scan counted different hits",
+    )
+    require(
+        rows[("byte_scan", "one")][3] == rows[("regex_scan", "one")][3],
+        "DEADBEEF byte scan and regex scan counted different hits",
+    )
+    word_scan = rows[("byte_scan", "word")][2]
+    regex_scan = rows[("regex_scan", "word")][2]
+    print(
+        f"word prefixes are {word_scan / repeat_rate:.3f}x the repeat scan; "
+        f"regex scan is {regex_scan / word_scan:.3f}x the byte scan; "
+        f"compiled-once regex matcher is {regex_word / byte_word:.4f}x the byte matcher; "
+        f"recompiled regex matcher is {recompile / byte_word:.4f}x the byte matcher"
+    )
 
 
 def test_cli_key(work: Path) -> None:
@@ -191,8 +421,12 @@ def main() -> None:
     work.mkdir()
     test_sha1()
     test_mpi_and_packet(work)
+    test_filters()
     test_search_agrees()
+    test_help()
     test_cli_key(work)
+    test_cli_filter(work)
+    test_bench(work)
     require(window_seconds(250) == 250 * 24 * 60 * 60, "250-day window changed")
     shutil.rmtree(work)
     print("all checks passed")

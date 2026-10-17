@@ -17,7 +17,7 @@ endif()
 find_package(Python REQUIRED COMPONENTS Interpreter Development.Module)
 find_package(OpenSSL REQUIRED)
 
-Python_add_library(_accel MODULE accel/module.c accel/search.c WITH_SOABI)
+Python_add_library(_accel MODULE accel/module.c accel/search.c accel/filter.c WITH_SOABI)
 target_include_directories(_accel PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/accel)
 target_link_libraries(_accel PRIVATE OpenSSL::Crypto)
 target_compile_definitions(_accel PRIVATE _GNU_SOURCE)

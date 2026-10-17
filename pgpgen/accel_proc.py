@@ -27,17 +27,21 @@ def sha1_digest(payload: bytes) -> bytes:
     return digest
 
 
-def search(preimage: bytes, max_iter: int, leading: int) -> tuple[int | None, int]:
+def search(preimage: bytes, max_iter: int, filt) -> tuple[int | None, int]:
     if len(preimage) < TIME_OFFSET + 4:
         raise ValueError("fingerprint preimage is too short")
-    if not 1 <= leading <= 8:
-        raise ValueError("leading must be from 1 to 8")
     if not 1 <= max_iter <= 0xFFFFFFFF:
         raise ValueError("iteration count does not fit in four bytes")
-    found, checked = _accel().search(preimage, TIME_OFFSET, max_iter, leading)
+    found, checked = _accel().search(preimage, TIME_OFFSET, max_iter, filt.pack())
     checked = int(checked)
     if checked < 0:
         raise RuntimeError("extension reported a negative attempt count")
     if found is None:
         return None, checked
     return int(found), checked
+
+
+def native_match(fingerprint: bytes, filt) -> bool:
+    if len(fingerprint) != 20:
+        raise ValueError("a v4 fingerprint is 20 bytes")
+    return bool(_accel().match(fingerprint, filt.pack()))
