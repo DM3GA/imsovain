@@ -4,7 +4,7 @@
 
 A v4 fingerprint is SHA-1 of the public key packet body, with a two-octet length prefix. That hash includes the key's creation time. The program keeps the Ed25519 key fixed and walks the creation time backward from now, one second at a time, until the key id matches. SHA-1 is here because [RFC 4880](https://www.rfc-editor.org/rfc/rfc4880) defines the v4 fingerprint that way.
 
-The key id is the last eight bytes of the fingerprint. `--filter` chooses which prefix counts:
+The key id is the last eight bytes of the fingerprint. A key id of `0000000000000000` is skipped and the search continues. OpenPGP uses that value as a wildcard key id, so it does not name this key. `--filter` chooses which prefix counts:
 
 | filter | the key id opens with |
 | --- | --- |

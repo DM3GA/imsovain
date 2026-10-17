@@ -160,6 +160,16 @@ def test_filters() -> None:
         (coffee, bytes.fromhex("C0FFEF0011223344"), False),
         (parse_filter("DEADBEEFCAFEBABE"), bytes.fromhex("DEADBEEFCAFEBABE"), True),
         (parse_filter("DEADBEEFCAFEBABE"), bytes.fromhex("DEADBEEFCAFEBABF"), False),
+        (parse_filter("repeat", 8), bytes(8), False),
+        (parse_filter("repeat", 8), bytes.fromhex("1111111111111111"), True),
+        (parse_filter("repeat", 6), bytes(8), False),
+        (parse_filter("repeat", 1), bytes.fromhex("00FFFFFFFFFFFFFF"), True),
+        (parse_filter("repeat", 1), bytes(8), False),
+        (parse_filter("00000000"), bytes.fromhex("00000000FFFFFFFF"), True),
+        (parse_filter("00000000"), bytes(8), False),
+        (parse_filter("0000000000000000"), bytes(8), False),
+        (parse_filter("00"), bytes.fromhex("0011223344556677"), True),
+        (parse_filter("00"), bytes(8), False),
     )
     for filt, key_id, want in vectors:
         fingerprint = fingerprint_with_key_id(key_id)

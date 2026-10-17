@@ -137,6 +137,9 @@ class Filter:
         if len(fingerprint) != 20:
             raise ValueError("a v4 fingerprint is 20 bytes")
         key_id = fingerprint[-8:]
+        # RFC 4880 uses an all-zero key id as a wildcard, so it names no key.
+        if key_id == b"\x00" * 8:
+            return False
         if self.kind == "repeat":
             if not 1 <= self.leading <= 8:
                 raise ValueError("leading must be from 1 to 8")

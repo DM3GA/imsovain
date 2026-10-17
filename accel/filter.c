@@ -49,11 +49,20 @@ int imsovain_filter_parse(const uint8_t *blob, size_t len, imsovain_filter *out)
     return 0;
 }
 
+/* RFC 4880 treats a key id of all zeros as a wildcard, not as one key. */
+static int key_id_is_wildcard(const uint8_t key_id[8]) {
+    static const uint8_t wildcard[8] = {0};
+    return memcmp(key_id, wildcard, 8) == 0;
+}
+
 int imsovain_filter_match(const uint8_t hash[20], const imsovain_filter *filter) {
     if (hash == NULL || filter == NULL) {
         return 0;
     }
     const uint8_t *key_id = hash + 12;
+    if (key_id_is_wildcard(key_id)) {
+        return 0;
+    }
     if (filter->kind == IMSOVAIN_FILTER_REPEAT) {
         uint8_t first = key_id[0];
         if ((first >> 4) != (first & 0x0f)) {
