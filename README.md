@@ -21,6 +21,8 @@ The scan compares those bytes. It does not turn the key id into hex and run a re
 
 On this machine one thread then hashes about 25 million keys per second, and 32 threads together about 460 million. The prefix table does not move that rate. The one-shot digest call this replaced stayed near 6 million per second on one thread and about 10 million with 32, because each call takes OpenSSL's provider lock. A POSIX regex compiled once is still several times slower than the byte table on its own, and compiling that regex on every hash is a few thousand times slower. `tests/check.py` prints the matcher numbers from the machine it is run on.
 
+`--opencl` runs that same scan on an OpenCL GPU. The CPU scan stays the default, and a missing GPU is an error rather than a silent fallback. On this machine the GPU hashes about 10 billion keys per second, about 20 times the 32-thread CPU scan. It hashes the whole window it was given. One GPU runs one scan at a time, so extra `-t` workers draw new keys in parallel but do not multiply the hash rate.
+
 Each output file is a transferable secret key: one certify-only primary, one user id, and a positive self-signature. There is no encryption subkey, and the secret material is not passphrase-protected. The files are mode `0600`.
 
 ## Requirements
@@ -28,6 +30,7 @@ Each output file is a transferable secret key: one certify-only primary, one use
 - Python 3.9 or newer, with development headers
 - A C compiler and OpenSSL (`libcrypto`)
 - GnuPG, if you want to import the result
+- An OpenCL GPU and `libOpenCL.so.1`, only if you pass `--opencl`
 
 `pip install` builds a Python extension from `accel/search.c` with scikit-build-core and CMake. The build downloads CMake if the environment does not already have it. The scan then runs inside the `pgpgen` process.
 
@@ -39,10 +42,10 @@ python3 -m venv .venv
 ## Run
 
 ```sh
-./compile_and_run.sh CORES 'Name <name@example.com>' [DAYS] [LEADING] [FILTER]
+./compile_and_run.sh CORES 'Name <name@example.com>' [DAYS] [LEADING] [FILTER] [opencl]
 ```
 
-`DAYS` is how far into the past the creation time may move. It defaults to 250. `LEADING` defaults to 6. `FILTER` defaults to `repeat`. The script installs the package, which compiles the extension, and starts the search.
+`DAYS` is how far into the past the creation time may move. It defaults to 250. `LEADING` defaults to 6. `FILTER` defaults to `repeat`. Pass `opencl` as the sixth argument to hash on the GPU. The script installs the package, which compiles the extension, and starts the search.
 
 The same options are on the `pgpgen` command. `--uid` is required.
 
@@ -56,9 +59,20 @@ pgpgen \
     -o PGPKEYS
 ```
 
+The same search on the GPU:
+
+```sh
+pgpgen \
+    -t 8 \
+    -u 'Name <name@example.com>' \
+    --opencl \
+    -f word \
+    -o PGPKEYS
+```
+
 `-f run` looks for `00112233` and the other counts. `-f C0DE` looks for that prefix alone. `-f repeat` is the doubled-nibble search.
 
-`-x` stops after the first written key. The program keeps going until you interrupt it. Threads share the process. Each scan keeps its own SHA-1 context and releases the GIL while it hashes. `pgpgen` checks a returned timestamp with its own SHA-1 before it writes the key.
+`-x` stops after the first written key. The program keeps going until you interrupt it. Threads share the process. Each CPU scan keeps its own SHA-1 context and releases the GIL while it hashes. `pgpgen` checks a returned timestamp with its own SHA-1 before it writes the key.
 
 ## Check
 
@@ -66,14 +80,15 @@ pgpgen \
 .venv/bin/python tests/check.py
 ```
 
-That builds the extension, compares its SHA-1 with `hashlib`, asks it for the same hit hashlib found, imports a fixed test key into a temporary GnuPG home, generates a `repeat` key and a `C0DE` key, and prints how the byte filter compares with `regexec`.
+That builds the extension, compares its SHA-1 with `hashlib`, asks the CPU and the GPU for the same hit hashlib found, imports a fixed test key into a temporary GnuPG home, generates a `repeat` key and a `C0DE` key on each path, and prints how the byte filter compares with `regexec`.
 
 ## Layout
 
 - `pgpgen/` builds the OpenPGP packets and drives the search
-- `accel/search.c` is the SHA-1 scan
+- `accel/search.c` is the CPU SHA-1 scan
+- `accel/opencl.c` is the same scan on an OpenCL GPU
 - `accel/filter.c` matches key-id prefixes without a regex
-- `accel/module.c` exposes that scan as `pgpgen._accel`
+- `accel/module.c` exposes both scans as `pgpgen._accel`
 - `CMakeLists.txt` and `pyproject.toml` build the extension
 - `compile_and_run.sh` installs the package and starts a search
 

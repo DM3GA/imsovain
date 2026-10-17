@@ -209,6 +209,92 @@ def assert_search_agrees(filt, found_at: int, key, start: int) -> None:
         require(missed is None, "C search matched earlier than hashlib")
 
 
+def assert_opencl_agrees(filt, found_at: int, key, start: int) -> None:
+    from pgpgen.accel_proc import search
+    from pgpgen.packets import SecretKeyPacket
+
+    original = SecretKeyPacket(key, start).fingerprint_preimage()
+    found, checked = search(original, found_at + 1, filt, opencl=True)
+    require(found == start - found_at, f"OpenCL returned {found}, hashlib found offset {found_at}")
+    require(checked == found_at + 1, f"OpenCL counted {checked} for a window of {found_at + 1}")
+    if found_at > 0:
+        missed, missed_checked = search(original, found_at, filt, opencl=True)
+        require(missed is None, "OpenCL matched earlier than hashlib")
+        require(missed_checked == found_at, f"OpenCL miss counted {missed_checked}")
+
+
+def test_opencl() -> None:
+    from pgpgen.accel_proc import opencl_device, search
+    from pgpgen.packets import Ed25519Key, SecretKeyPacket
+    from pgpgen.pattern import parse_filter
+
+    print(f"opencl device {opencl_device()}")
+    for _ in range(8):
+        filt = parse_filter("repeat", 2)
+        key, start, found_at = find_with_hashlib(filt, 200_000)
+        assert_opencl_agrees(filt, found_at, key, start)
+    filt = parse_filter("short")
+    key, start, found_at = find_with_hashlib(filt, 200_000)
+    assert_opencl_agrees(filt, found_at, key, start)
+    filt = parse_filter("C0DE")
+    key, start, found_at = find_with_hashlib(filt, 2_000_000)
+    assert_opencl_agrees(filt, found_at, key, start)
+    filt = parse_filter("repeat", 3)
+    key, start, found_at = find_with_hashlib(filt, 8_000_000)
+    assert_opencl_agrees(filt, found_at, key, start)
+
+    start = int(time.time())
+    preimage = SecretKeyPacket(Ed25519Key(os.urandom(32)), start).fingerprint_preimage()
+    iters = 1 << 30
+    if iters > start:
+        iters = start
+    hard = parse_filter("repeat", 8)
+    # The GPU clock is low until a couple of full windows have run.
+    search(preimage, iters, hard, opencl=True)
+    search(preimage, iters, hard, opencl=True)
+    begin = time.perf_counter()
+    found, checked = search(preimage, iters, hard, opencl=True)
+    elapsed = time.perf_counter() - begin
+    require(found is None, "benchmark window matched an 8-byte repeat")
+    require(checked == iters, f"benchmark counted {checked}")
+    require(elapsed > 0, "benchmark clock did not move")
+    print(f"opencl scan {checked / elapsed:.0f}/s over {checked} hashes in {elapsed:.3f}s")
+
+
+def test_cli_opencl(work: Path) -> None:
+    outdir = work / "opencl-keys"
+    command = [
+        sys.executable,
+        "-m",
+        "pgpgen",
+        "-t",
+        "4",
+        "-m",
+        "3",
+        "-f",
+        "C0DE",
+        "-u",
+        UID,
+        "-x",
+        "--opencl",
+        "-o",
+        str(outdir),
+    ]
+    completed = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, check=False)
+    require(completed.returncode == 0, completed.stdout + completed.stderr)
+    require("opencl " in completed.stdout, completed.stdout + completed.stderr)
+    require("filter c0de: C0DE" in completed.stdout, completed.stdout)
+    keys = sorted(outdir.iterdir())
+    require(len(keys) >= 1, "OpenCL C0DE filter wrote no key")
+    for index, key_path in enumerate(keys):
+        require(stat.S_IMODE(key_path.stat().st_mode) == 0o600, "secret key was not mode 0600")
+        compact = key_path.name.replace("_", "")
+        require(compact[-16:-12] == "C0DE", f"key id does not open with C0DE: {key_path.name}")
+        listed = gpg_import(work / f"gnupg-opencl-{index}", key_path)
+        require(listed == compact, "saved filename does not match the GnuPG fingerprint")
+        print(f"verified {key_path.name}")
+
+
 def test_search_agrees() -> None:
     from pgpgen.pattern import parse_filter
 
@@ -265,6 +351,7 @@ def test_help() -> None:
     require(completed.returncode == 0, completed.stderr)
     require("--filter" in completed.stdout and "00112233" in completed.stdout, completed.stdout)
     require("C0DE" in completed.stdout, completed.stdout)
+    require("--opencl" in completed.stdout, completed.stdout)
 
 
 def test_bench(work: Path) -> None:
@@ -423,9 +510,11 @@ def main() -> None:
     test_mpi_and_packet(work)
     test_filters()
     test_search_agrees()
+    test_opencl()
     test_help()
     test_cli_key(work)
     test_cli_filter(work)
+    test_cli_opencl(work)
     test_bench(work)
     require(window_seconds(250) == 250 * 24 * 60 * 60, "250-day window changed")
     shutil.rmtree(work)

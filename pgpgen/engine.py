@@ -36,7 +36,7 @@ def window_seconds(days: int) -> int:
     return seconds
 
 
-def attempt_key(outdir: str, user_id: str, max_iter: int, filt: Filter) -> Attempt:
+def attempt_key(outdir: str, user_id: str, max_iter: int, filt: Filter, opencl: bool = False) -> Attempt:
     started = time.perf_counter()
     key = Ed25519Key(os.urandom(32))
     created = int(time.time())
@@ -45,7 +45,7 @@ def attempt_key(outdir: str, user_id: str, max_iter: int, filt: Filter) -> Attem
     if preimage[TIME_OFFSET : TIME_OFFSET + 4] != created.to_bytes(4, "big"):
         raise RuntimeError("creation time is not at the expected fingerprint offset")
 
-    found, checked = search(preimage, max_iter, filt)
+    found, checked = search(preimage, max_iter, filt, opencl=opencl)
     elapsed = time.perf_counter() - started
     if found is None:
         return Attempt(checked=checked, seconds=elapsed)

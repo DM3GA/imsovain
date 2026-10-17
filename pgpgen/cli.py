@@ -81,6 +81,11 @@ def _report(result) -> None:
     is_flag=True,
     help="Stop after writing one matching key.",
 )
+@click.option(
+    "--opencl",
+    is_flag=True,
+    help="Hash creation times on an OpenCL GPU. Without this flag, every search stays on the CPU.",
+)
 def main(
     threads: int,
     outdir: str,
@@ -89,6 +94,7 @@ def main(
     filter_name: str,
     uid: str,
     exit_after_found: bool,
+    opencl: bool,
 ) -> None:
     """Search creation timestamps until an Ed25519 fingerprint matches."""
     user_id_bytes(uid)
@@ -99,8 +105,16 @@ def main(
     outdir = os.path.abspath(outdir)
     os.makedirs(outdir, exist_ok=True)
     max_iter = window_seconds(max_time_days)
+    if opencl:
+        from pgpgen.accel_proc import opencl_device
+
+        try:
+            device = opencl_device()
+        except RuntimeError as exc:
+            raise click.ClickException(str(exc)) from exc
+        print(f"opencl {device}", flush=True)
     print(f"filter {describe(filt)}", flush=True)
-    worker_args = (outdir, uid, max_iter, filt)
+    worker_args = (outdir, uid, max_iter, filt, opencl)
 
     with ThreadPoolExecutor(max_workers=threads) as pool:
         pending = set()

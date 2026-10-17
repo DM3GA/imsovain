@@ -1,6 +1,7 @@
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 
+#include "opencl.h"
 #include "search.h"
 
 #include <stdint.h>
@@ -24,12 +25,11 @@ static PyObject *py_sha1(PyObject *self, PyObject *args) {
     return PyBytes_FromStringAndSize((const char *)hash, 20);
 }
 
-static PyObject *py_search(PyObject *self, PyObject *args) {
+static PyObject *run_search(PyObject *args, int use_opencl) {
     Py_buffer view;
     Py_buffer blob;
     unsigned long time_off = 0;
     unsigned long max_iter = 0;
-    (void)self;
     if (!PyArg_ParseTuple(args, "y*kky*", &view, &time_off, &max_iter, &blob)) {
         return NULL;
     }
@@ -64,12 +64,17 @@ static PyObject *py_search(PyObject *self, PyObject *args) {
     uint64_t checked = 0;
     int64_t found = 0;
     Py_BEGIN_ALLOW_THREADS
-    found = pgpgen_search(copy, len, (size_t)time_off, (uint32_t)max_iter, &filter, &checked);
+    if (use_opencl) {
+        found = pgpgen_opencl_search(copy, len, (size_t)time_off, (uint32_t)max_iter, &filter, &checked);
+    } else {
+        found = pgpgen_search(copy, len, (size_t)time_off, (uint32_t)max_iter, &filter, &checked);
+    }
     Py_END_ALLOW_THREADS
     free(copy);
 
     if (found == -2) {
-        PyErr_SetString(PyExc_RuntimeError, "SHA-1 search failed");
+        const char *message = use_opencl ? pgpgen_opencl_last_error() : "SHA-1 search failed";
+        PyErr_SetString(PyExc_RuntimeError, message);
         return NULL;
     }
 
@@ -84,6 +89,27 @@ static PyObject *py_search(PyObject *self, PyObject *args) {
         }
     }
     return Py_BuildValue("NK", stamp, (unsigned long long)checked);
+}
+
+static PyObject *py_search(PyObject *self, PyObject *args) {
+    (void)self;
+    return run_search(args, 0);
+}
+
+static PyObject *py_search_opencl(PyObject *self, PyObject *args) {
+    (void)self;
+    return run_search(args, 1);
+}
+
+static PyObject *py_opencl_device(PyObject *self, PyObject *unused) {
+    char name[256];
+    (void)self;
+    (void)unused;
+    if (pgpgen_opencl_device(name, sizeof name) != 0) {
+        PyErr_SetString(PyExc_RuntimeError, pgpgen_opencl_last_error());
+        return NULL;
+    }
+    return PyUnicode_FromString(name);
 }
 
 static PyObject *py_match(PyObject *self, PyObject *args) {
@@ -121,7 +147,10 @@ static PyObject *py_match(PyObject *self, PyObject *args) {
 static PyMethodDef methods[] = {
     {"sha1", py_sha1, METH_VARARGS, "Return the SHA-1 digest of a byte string."},
     {"search", py_search, METH_VARARGS,
-     "Search creation times. Returns (unix time or None, digests computed)."},
+     "Search creation times on the CPU. Returns (unix time or None, digests computed)."},
+    {"search_opencl", py_search_opencl, METH_VARARGS,
+     "Search creation times on an OpenCL GPU. Returns (unix time or None, digests dispatched)."},
+    {"opencl_device", py_opencl_device, METH_NOARGS, "Return the OpenCL GPU name."},
     {"match", py_match, METH_VARARGS, "Return whether a fingerprint matches a packed filter."},
     {NULL, NULL, 0, NULL},
 };
@@ -129,7 +158,7 @@ static PyMethodDef methods[] = {
 static struct PyModuleDef module_def = {
     PyModuleDef_HEAD_INIT,
     .m_name = "_accel",
-    .m_doc = "In-process OpenPGP v4 fingerprint search.",
+    .m_doc = "In-process OpenPGP v4 fingerprint search. The GPU path is separate from the CPU scan.",
     .m_size = -1,
     .m_methods = methods,
 };

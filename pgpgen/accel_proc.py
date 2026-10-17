@@ -1,7 +1,9 @@
 """In-process SHA-1 search.
 
-`pgpgen._accel` is the extension built by CMake. The search releases the
-GIL, so several Python threads can hash at the same time.
+`pgpgen._accel` is the extension built by CMake. The CPU search releases
+the GIL, so several Python threads can hash at the same time. The OpenCL
+search also releases the GIL. One GPU runs one scan at a time, and that
+scan hashes the whole window instead of stopping at the first hit.
 """
 
 from __future__ import annotations
@@ -27,18 +29,29 @@ def sha1_digest(payload: bytes) -> bytes:
     return digest
 
 
-def search(preimage: bytes, max_iter: int, filt) -> tuple[int | None, int]:
+def search(preimage: bytes, max_iter: int, filt, opencl: bool = False) -> tuple[int | None, int]:
     if len(preimage) < TIME_OFFSET + 4:
         raise ValueError("fingerprint preimage is too short")
     if not 1 <= max_iter <= 0xFFFFFFFF:
         raise ValueError("iteration count does not fit in four bytes")
-    found, checked = _accel().search(preimage, TIME_OFFSET, max_iter, filt.pack())
+    native = _accel()
+    if opencl:
+        found, checked = native.search_opencl(preimage, TIME_OFFSET, max_iter, filt.pack())
+    else:
+        found, checked = native.search(preimage, TIME_OFFSET, max_iter, filt.pack())
     checked = int(checked)
     if checked < 0:
         raise RuntimeError("extension reported a negative attempt count")
     if found is None:
         return None, checked
     return int(found), checked
+
+
+def opencl_device() -> str:
+    name = _accel().opencl_device()
+    if not isinstance(name, str) or name == "":
+        raise RuntimeError("OpenCL device name was empty")
+    return name
 
 
 def native_match(fingerprint: bytes, filt) -> bool:
