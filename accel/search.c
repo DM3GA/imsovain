@@ -30,6 +30,32 @@ int pgpgen_sha1(const uint8_t *data, size_t len, uint8_t out[20]) {
     return out_len == 20 ? 0 : -1;
 }
 
+/* Reuse one context for every hash in a scan. EVP_Digest() builds a context
+   and takes OpenSSL 3's provider lock on each call, so threads stall on it.
+   The context belongs to this scan. Worker threads do not share it.
+*/
+static EVP_MD_CTX *sha1_context(void) {
+    EVP_MD_CTX *ctx = EVP_MD_CTX_new();
+    if (ctx == NULL) {
+        return NULL;
+    }
+    if (EVP_DigestInit_ex(ctx, EVP_sha1(), NULL) != 1) {
+        EVP_MD_CTX_free(ctx);
+        return NULL;
+    }
+    return ctx;
+}
+
+static int sha1_reuse(EVP_MD_CTX *ctx, const uint8_t *data, size_t len, uint8_t out[20]) {
+    unsigned int out_len = 0;
+    if (EVP_DigestInit_ex(ctx, NULL, NULL) != 1 ||
+        EVP_DigestUpdate(ctx, data, len) != 1 ||
+        EVP_DigestFinal_ex(ctx, out, &out_len) != 1) {
+        return -1;
+    }
+    return out_len == 20 ? 0 : -1;
+}
+
 static int filter_ok(const pgpgen_filter *filter) {
     if (filter == NULL) {
         return 0;
@@ -58,7 +84,10 @@ static int64_t scan_times(const uint8_t *src, size_t len, size_t time_off,
     }
 
     uint8_t *buf = malloc(len);
-    if (buf == NULL) {
+    EVP_MD_CTX *ctx = sha1_context();
+    if (buf == NULL || ctx == NULL) {
+        EVP_MD_CTX_free(ctx);
+        free(buf);
         return -2;
     }
     memcpy(buf, src, len);
@@ -76,7 +105,8 @@ static int64_t scan_times(const uint8_t *src, size_t len, size_t time_off,
         uint32_t stamp = start - i;
         write_be32(buf + time_off, stamp);
         uint8_t hash[20];
-        if (pgpgen_sha1(buf, len, hash) != 0) {
+        if (sha1_reuse(ctx, buf, len, hash) != 0) {
+            EVP_MD_CTX_free(ctx);
             free(buf);
             return -2;
         }
@@ -95,6 +125,7 @@ static int64_t scan_times(const uint8_t *src, size_t len, size_t time_off,
     if (matches != NULL) {
         *matches = hits;
     }
+    EVP_MD_CTX_free(ctx);
     free(buf);
     if (!stop_on_match) {
         return 0;

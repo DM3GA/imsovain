@@ -19,7 +19,7 @@ The key id is the last eight bytes of the fingerprint. `--filter` chooses which 
 
 The scan compares those bytes. It does not turn the key id into hex and run a regular expression. A prefix filter is a 256-slot table on the first byte, then a compare of the rest, built once before the loop.
 
-On this machine that table does not move the scan off the SHA-1 limit. `repeat`, `run`, `word`, and a single prefix such as `DEADBEEF` all hashed at about 6.8 million keys per second. A POSIX regex compiled once is about seven times slower than the byte table on its own, and running it inside the scan made the scan about 15% slower. Compiling that same regex on every hash fell to about 70 thousand matches per second, a few thousand times slower than the byte table, which is the hole a per-key regex falls into. `tests/check.py` prints the numbers from the machine it is run on.
+On this machine one thread then hashes about 25 million keys per second, and 32 threads together about 460 million. The prefix table does not move that rate. The one-shot digest call this replaced stayed near 6 million per second on one thread and about 10 million with 32, because each call takes OpenSSL's provider lock. A POSIX regex compiled once is still several times slower than the byte table on its own, and compiling that regex on every hash is a few thousand times slower. `tests/check.py` prints the matcher numbers from the machine it is run on.
 
 Each output file is a transferable secret key: one certify-only primary, one user id, and a positive self-signature. There is no encryption subkey, and the secret material is not passphrase-protected. The files are mode `0600`.
 
@@ -58,7 +58,7 @@ pgpgen \
 
 `-f run` looks for `00112233` and the other counts. `-f C0DE` looks for that prefix alone. `-f repeat` is the doubled-nibble search.
 
-`-x` stops after the first written key. The program keeps going until you interrupt it. Threads share the process, and the scan releases the GIL while it hashes. `pgpgen` checks a returned timestamp with its own SHA-1 before it writes the key.
+`-x` stops after the first written key. The program keeps going until you interrupt it. Threads share the process. Each scan keeps its own SHA-1 context and releases the GIL while it hashes. `pgpgen` checks a returned timestamp with its own SHA-1 before it writes the key.
 
 ## Check
 
