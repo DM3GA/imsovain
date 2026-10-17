@@ -1,4 +1,4 @@
-"""Generate one key and ask the accelerator to place its creation time."""
+"""Generate one key and move its creation time until the key id matches."""
 
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ def window_seconds(days: int) -> int:
     return seconds
 
 
-def attempt_key(binary: str, outdir: str, user_id: str, max_iter: int, leading: int) -> Attempt:
+def attempt_key(outdir: str, user_id: str, max_iter: int, leading: int) -> Attempt:
     started = time.perf_counter()
     key = Ed25519Key(os.urandom(32))
     created = int(time.time())
@@ -45,7 +45,7 @@ def attempt_key(binary: str, outdir: str, user_id: str, max_iter: int, leading: 
     if preimage[TIME_OFFSET : TIME_OFFSET + 4] != created.to_bytes(4, "big"):
         raise RuntimeError("creation time is not at the expected fingerprint offset")
 
-    found, checked = search(binary, preimage, max_iter, leading)
+    found, checked = search(preimage, max_iter, leading)
     elapsed = time.perf_counter() - started
     if found is None:
         return Attempt(checked=checked, seconds=elapsed)
@@ -53,7 +53,7 @@ def attempt_key(binary: str, outdir: str, user_id: str, max_iter: int, leading: 
     placed = SecretKeyPacket(key, found)
     fingerprint = placed.fingerprint()
     if not key_id_matches(fingerprint, leading):
-        raise RuntimeError("accelerator timestamp does not produce the requested key id")
+        raise RuntimeError("search timestamp does not produce the requested key id")
 
     text = format_fingerprint(fingerprint)
     path = os.path.join(outdir, text)

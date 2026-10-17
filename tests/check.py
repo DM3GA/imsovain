@@ -13,18 +13,6 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
-
-from pgpgen.accel_proc import search, self_test_hex, sha1_hex  # noqa: E402
-from pgpgen.engine import window_seconds  # noqa: E402
-from pgpgen.packets import (  # noqa: E402
-    Ed25519Key,
-    SecretKeyPacket,
-    format_fingerprint,
-    mpi_encode,
-    transferable_secret_key,
-)
-from pgpgen.pattern import key_id_matches  # noqa: E402
 
 UID = "pgpgen test <pgpgen-test@example.com>"
 LONG_UID = ("pgpgen " + ("A" * 300) + " <long-user@example.com>")
@@ -35,24 +23,8 @@ def require(condition: bool, message: str) -> None:
         raise SystemExit(message)
 
 
-def cmake_program() -> str:
-    found = shutil.which("cmake")
-    if found:
-        return found
-    bundled = ROOT / ".venv" / "bin" / "cmake"
-    if bundled.is_file():
-        return str(bundled)
-    raise SystemExit("cmake is not installed")
-
-
-def compile_accel() -> Path:
-    build = ROOT / "build"
-    cmake = cmake_program()
-    subprocess.run([cmake, "-S", str(ROOT), "-B", str(build)], check=True)
-    subprocess.run([cmake, "--build", str(build)], check=True)
-    binary = build / "pgpgen-accel"
-    require(binary.is_file(), "CMake did not produce build/pgpgen-accel")
-    return binary
+def build_extension() -> None:
+    subprocess.run([sys.executable, "-m", "pip", "install", "-e", str(ROOT)], check=True)
 
 
 def gpg_import(home: Path, key_path: Path) -> str:
@@ -91,17 +63,22 @@ def gpg_import(home: Path, key_path: Path) -> str:
     return fingerprints[0]
 
 
-def test_sha1(binary: Path) -> None:
-    expected = hashlib.sha1(b"pgpgen-sha1-selftest").hexdigest()
-    require(self_test_hex(str(binary)) == expected, "OpenSSL self-test disagrees with hashlib")
+def test_sha1() -> None:
+    from pgpgen.accel_proc import sha1_digest
+    from pgpgen.packets import Ed25519Key, SecretKeyPacket
+
+    expected = hashlib.sha1(b"pgpgen-sha1-selftest").digest()
+    require(sha1_digest(b"pgpgen-sha1-selftest") == expected, "OpenSSL SHA-1 disagrees with hashlib")
     key = Ed25519Key(bytes(range(32)))
     for created in (1_700_000_000, 1_700_000_123, int(time.time())):
         preimage = SecretKeyPacket(key, created).fingerprint_preimage()
-        require(sha1_hex(str(binary), preimage) == hashlib.sha1(preimage).hexdigest(), "preimage digest mismatch")
+        require(sha1_digest(preimage) == hashlib.sha1(preimage).digest(), "preimage digest mismatch")
         require(preimage[4:8] == created.to_bytes(4, "big"), "creation time is not at offset 4")
 
 
 def test_mpi_and_packet(work: Path) -> None:
+    from pgpgen.packets import Ed25519Key, SecretKeyPacket, mpi_encode, transferable_secret_key
+
     point = b"\x40" + bytes(range(32))
     encoded = mpi_encode(point)
     bit_length = int.from_bytes(encoded[:2], "big")
@@ -137,7 +114,10 @@ def blob_index_of_uid(blob: bytes) -> int:
     return 2 + blob[1]
 
 
-def test_search_agrees(binary: Path) -> None:
+def test_search_agrees() -> None:
+    from pgpgen.accel_proc import search
+    from pgpgen.packets import Ed25519Key, SecretKeyPacket
+    from pgpgen.pattern import key_id_matches
     leading = 3
     key = Ed25519Key(os.urandom(32))
     start = int(time.time())
@@ -153,18 +133,16 @@ def test_search_agrees(binary: Path) -> None:
             break
     require(found_at is not None, f"no 3-byte key id in {limit} hashlib attempts")
     original = SecretKeyPacket(key, start).fingerprint_preimage()
-    found, checked = search(str(binary), original, found_at + 1, leading)
+    found, checked = search(original, found_at + 1, leading)
     require(found == start - found_at, f"C search returned {found}, hashlib found offset {found_at}")
     require(checked == found_at + 1, f"C search counted {checked} attempts")
     if found_at > 0:
-        missed, _checked = search(str(binary), original, found_at, leading)
+        missed, _checked = search(original, found_at, leading)
         require(missed is None, "C search matched earlier than hashlib")
 
 
-def test_cli_key(binary: Path, work: Path) -> None:
+def test_cli_key(work: Path) -> None:
     outdir = work / "keys"
-    env = os.environ.copy()
-    env["PYTHONPATH"] = str(ROOT)
     command = [
         sys.executable,
         "-m",
@@ -180,10 +158,8 @@ def test_cli_key(binary: Path, work: Path) -> None:
         "-x",
         "-o",
         str(outdir),
-        "-a",
-        str(binary),
     ]
-    completed = subprocess.run(command, cwd=ROOT, env=env, capture_output=True, text=True, check=False)
+    completed = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, check=False)
     require(completed.returncode == 0, completed.stdout + completed.stderr)
     keys = sorted(outdir.iterdir())
     require(len(keys) >= 1, "generator wrote no key")
@@ -199,15 +175,24 @@ def test_cli_key(binary: Path, work: Path) -> None:
 
 
 def main() -> None:
+    # pip's editable hook is loaded at interpreter startup. Build first, then
+    # re-exec so this process can import pgpgen._accel.
+    if os.environ.get("PGPGEN_CHECKS") != "1":
+        build_extension()
+        env = os.environ.copy()
+        env["PGPGEN_CHECKS"] = "1"
+        os.execve(sys.executable, [sys.executable, str(ROOT / "tests" / "check.py")], env)
+
+    from pgpgen.engine import window_seconds
+
     work = ROOT / "testrun"
     if work.exists():
         shutil.rmtree(work)
     work.mkdir()
-    binary = compile_accel()
-    test_sha1(binary)
+    test_sha1()
     test_mpi_and_packet(work)
-    test_search_agrees(binary)
-    test_cli_key(binary, work)
+    test_search_agrees()
+    test_cli_key(work)
     require(window_seconds(250) == 250 * 24 * 60 * 60, "250-day window changed")
     shutil.rmtree(work)
     print("all checks passed")

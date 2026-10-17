@@ -4,6 +4,7 @@ PGPKEYS/
 PGPKEYS2/
 *.pgp
 testrun/
+_skbuild/
 accel/accel_openssl
 # Created by https://www.toptal.com/developers/gitignore/api/clion+all,pycharm+all,cmake,python
 # Edit at https://www.toptal.com/developers/gitignore?templates=clion+all,pycharm+all,cmake,python

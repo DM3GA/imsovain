@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import multiprocessing as mp
 import os
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import click
 
@@ -68,13 +68,6 @@ def _report(result) -> None:
     is_flag=True,
     help="Stop after writing one matching key.",
 )
-@click.option(
-    "--accelerate-with",
-    "-a",
-    type=click.Path(exists=True, dir_okay=False),
-    required=True,
-    help="OpenSSL search program.",
-)
 def main(
     threads: int,
     outdir: str,
@@ -82,40 +75,32 @@ def main(
     leading: int,
     uid: str,
     exit_after_found: bool,
-    accelerate_with: str,
 ) -> None:
     """Search creation timestamps until an Ed25519 fingerprint matches."""
     user_id_bytes(uid)
     outdir = os.path.abspath(outdir)
     os.makedirs(outdir, exist_ok=True)
     max_iter = window_seconds(max_time_days)
-    binary = os.path.abspath(accelerate_with)
-    worker_args = (binary, outdir, uid, max_iter, leading)
+    worker_args = (outdir, uid, max_iter, leading)
 
-    context = mp.get_context("fork")
-    with context.Pool(threads) as pool:
-        pending: list = []
+    with ThreadPoolExecutor(max_workers=threads) as pool:
+        pending = set()
         try:
             while True:
                 while len(pending) < threads:
-                    pending.append(pool.apply_async(attempt_key, worker_args))
-                still = []
+                    pending.add(pool.submit(attempt_key, *worker_args))
+                finished = {job for job in pending if job.done()}
                 found = False
-                for job in pending:
-                    if not job.ready():
-                        still.append(job)
-                        continue
-                    result = job.get()
+                for job in finished:
+                    result = job.result()
                     _report(result)
                     if result.fingerprint:
                         found = True
-                pending = still
+                pending -= finished
                 if found and exit_after_found:
-                    pool.terminate()
                     return
                 if pending:
                     time.sleep(0.05)
         except KeyboardInterrupt:
-            pool.terminate()
             print("stopped", file=sys.stderr)
             sys.exit(130)

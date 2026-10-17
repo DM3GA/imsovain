@@ -10,17 +10,16 @@ Each output file is a transferable secret key: one certify-only primary, one use
 
 ## Requirements
 
-- Python 3.9 or newer
-- CMake 3.16 or newer, GCC, and OpenSSL (`libcrypto`)
+- Python 3.9 or newer, with development headers
+- A C compiler and OpenSSL (`libcrypto`)
 - GnuPG, if you want to import the result
+
+`pip install` builds a Python extension from `accel/search.c` with scikit-build-core and CMake. The build downloads CMake if the environment does not already have it. The scan then runs inside the `pgpgen` process.
 
 ```sh
 python3 -m venv .venv
-.venv/bin/pip install -e '.[build]'
-cmake -S . -B build && cmake --build build
+.venv/bin/pip install -e .
 ```
-
-`pip install -e '.[build]'` installs the `pgpgen` command and, when the system has no CMake, a CMake binary inside the virtualenv. `CMakeLists.txt` builds `build/pgpgen-accel`, the program that runs the SHA-1 scan. A `cmake` already on `PATH` is used in preference to the virtualenv copy.
 
 ## Run
 
@@ -28,7 +27,7 @@ cmake -S . -B build && cmake --build build
 ./compile_and_run.sh CORES 'Name <name@example.com>' [DAYS] [LEADING]
 ```
 
-`DAYS` is how far into the past the creation time may move. It defaults to 250. `LEADING` defaults to 6. The script configures CMake, builds `build/pgpgen-accel`, and starts the search.
+`DAYS` is how far into the past the creation time may move. It defaults to 250. `LEADING` defaults to 6. The script installs the package, which compiles the extension, and starts the search.
 
 The same options are on the `pgpgen` command. `--uid` is required.
 
@@ -38,13 +37,10 @@ pgpgen \
     -u 'Name <name@example.com>' \
     -m 250 \
     -l 6 \
-    -o PGPKEYS \
-    -a build/pgpgen-accel
+    -o PGPKEYS
 ```
 
-`-x` stops after the first written key. The program keeps going until you interrupt it.
-
-The search program reads one request on stdin: the fingerprint preimage, the offset of the creation time, the attempt limit, and the leading-byte count. It prints the matching unix time, or `-1`, and then how many SHA-1 digests it computed. `pgpgen` checks that timestamp with its own SHA-1 before it writes the key.
+`-x` stops after the first written key. The program keeps going until you interrupt it. Threads share the process, and the scan releases the GIL while it hashes. `pgpgen` checks a returned timestamp with its own SHA-1 before it writes the key.
 
 ## Check
 
@@ -52,14 +48,14 @@ The search program reads one request on stdin: the fingerprint preimage, the off
 .venv/bin/python tests/check.py
 ```
 
-That builds `build/pgpgen-accel` with CMake, compares its SHA-1 with `hashlib`, asks it for the same hit hashlib found, imports a fixed test key into a temporary GnuPG home, and generates one key whose key id opens with three matching bytes.
+That builds the extension, compares its SHA-1 with `hashlib`, asks it for the same hit hashlib found, imports a fixed test key into a temporary GnuPG home, and generates a key whose key id opens with three matching bytes.
 
 ## Layout
 
 - `pgpgen/` builds the OpenPGP packets and drives the search
-- `accel/accel_openssl.c` is the SHA-1 scan
-- `CMakeLists.txt` builds that scan as `build/pgpgen-accel`
-- `pyproject.toml` packages the Python driver
-- `compile_and_run.sh` builds the scan and starts a search
+- `accel/search.c` is the SHA-1 scan
+- `accel/module.c` exposes that scan as `pgpgen._accel`
+- `CMakeLists.txt` and `pyproject.toml` build the extension
+- `compile_and_run.sh` installs the package and starts a search
 
 Generated keys under `PGPKEYS/`, `FOUND/`, and `FOUND_OLD/` stay out of git.

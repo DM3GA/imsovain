@@ -1,5 +1,10 @@
-cmake_minimum_required(VERSION 3.16)
-project(pgpgen VERSION 0.1.0 LANGUAGES C)
+cmake_minimum_required(VERSION 3.15...3.30)
+
+if(NOT DEFINED SKBUILD_PROJECT_NAME)
+    set(SKBUILD_PROJECT_NAME pgpgen)
+endif()
+
+project(${SKBUILD_PROJECT_NAME} LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -9,15 +14,13 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
 
-if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    message(FATAL_ERROR "pgpgen-accel uses Linux prctl")
-endif()
-
+find_package(Python REQUIRED COMPONENTS Interpreter Development.Module)
 find_package(OpenSSL REQUIRED)
 
-add_executable(pgpgen-accel accel/accel_openssl.c)
-target_link_libraries(pgpgen-accel PRIVATE OpenSSL::Crypto)
-target_compile_definitions(pgpgen-accel PRIVATE _GNU_SOURCE)
-target_compile_options(pgpgen-accel PRIVATE -Wall -Wextra -Werror)
+Python_add_library(_accel MODULE accel/module.c accel/search.c WITH_SOABI)
+target_include_directories(_accel PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/accel)
+target_link_libraries(_accel PRIVATE OpenSSL::Crypto)
+target_compile_definitions(_accel PRIVATE _GNU_SOURCE)
+target_compile_options(_accel PRIVATE -Wall -Wextra -Werror)
 
-install(TARGETS pgpgen-accel RUNTIME DESTINATION bin)
+install(TARGETS _accel DESTINATION pgpgen)
