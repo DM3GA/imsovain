@@ -24,7 +24,7 @@ dependencies = [
 ]
 
 [project.scripts]
-imsovain = "imsovain.cli:main"
+imsovain = "imsovain.__main__:main"
 
 [tool.scikit-build]
 minimum-version = "0.10"

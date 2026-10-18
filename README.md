@@ -66,64 +66,39 @@ gpg --import PGPKEYS/<fingerprint>
 
 The build does not need OpenCL headers. `libOpenCL.so.1` is loaded at run time. `pip install` builds `accel/` with scikit-build-core and CMake, and downloads CMake when the environment does not already have it.
 
-## Build and run
+## Run
 
 From a fresh checkout:
 
 ```sh
-python3 build_and_run.py 32 'Name <name@example.com>' 250 6 repeat opencl
+python3 -m imsovain \
+    -t 32 \
+    -u 'Name <name@example.com>' \
+    -o PGPKEYS \
+    --opencl
 ```
 
-That creates `.venv` if it is missing, installs this tree into it, compiles the C extension, and starts the search. Arguments:
+The first run creates `.venv` when it is missing, installs this tree, compiles the C extension, and starts the search. The same command reuses that environment afterward. `.venv/bin/imsovain` is the same program.
 
-```text
-python3 build_and_run.py CORES UID [DAYS] [LEADING] [FILTER] [opencl]
-```
-
-`DAYS` defaults to 250, `LEADING` to 6, and `FILTER` to `repeat`. The sixth argument is the word `opencl` or it is omitted. Keys land in `PGPKEYS/` next to the script. The search runs until you interrupt it.
+`--uid` and `--outdir` are required. `--threads` defaults to the machine's CPU count, `--max-time-days` to 250, `--leading` to 6, and `--filter` to `repeat`. `--opencl` hashes on the GPU. The search runs until you interrupt it. `python3 -m imsovain --help` lists every flag.
 
 Examples, all of them average waits on the machine above:
 
 ```sh
 # Three identical bytes on one CPU thread. Usually under a second.
-python3 build_and_run.py 1 'Name <name@example.com>' 30 3 repeat
+python3 -m imsovain -t 1 -u 'Name <name@example.com>' -m 30 -l 3 -o PGPKEYS
 
 # DEADBEEF and the other four-byte words, eight CPU threads.
-python3 build_and_run.py 8 'Name <name@example.com>' 250 6 word
+python3 -m imsovain -t 8 -u 'Name <name@example.com>' -f word -o PGPKEYS
 
 # The prefix C0DE on the GPU. One hash in 65536 matches, so this is quick.
-python3 build_and_run.py 4 'Name <name@example.com>' 7 2 C0DE opencl
+python3 -m imsovain -t 4 -u 'Name <name@example.com>' -m 7 -f C0DE -o PGPKEYS --opencl
 
 # Six-byte repeat on the GPU. Average about half an hour.
-python3 build_and_run.py 32 'Name <name@example.com>' 250 6 repeat opencl
+python3 -m imsovain -t 32 -u 'Name <name@example.com>' -o PGPKEYS --opencl
 
-# The count 00112233, among the other runs.
-python3 build_and_run.py 8 'Name <name@example.com>' 60 4 run opencl
-```
-
-After the first install, the `imsovain` command in `.venv` is the same search with the flags spelled out. `--uid` is required.
-
-```sh
-.venv/bin/imsovain \
-    -t 8 \
-    -u 'Name <name@example.com>' \
-    -m 250 \
-    -l 6 \
-    -f word \
-    -o PGPKEYS
-```
-
-The same search on the GPU, stopping at the first key:
-
-```sh
-.venv/bin/imsovain \
-    -t 4 \
-    -u 'Name <name@example.com>' \
-    -m 30 \
-    -f C0DE \
-    -o PGPKEYS \
-    --opencl \
-    -x
+# The count 00112233, among the other runs, stopping at the first key.
+python3 -m imsovain -t 8 -u 'Name <name@example.com>' -m 60 -f run -o PGPKEYS --opencl -x
 ```
 
 `-x` stops after one written key. Without it the program keeps going. `-f run` looks for `00112233` and the other counts. `-f coffee` looks for `C0FFEE`.
@@ -138,7 +113,7 @@ python3 -m venv .venv
 .venv/bin/python tests/check.py
 ```
 
-`build_and_run.py` already creates that environment, so this is enough on a second run:
+A search creates that environment on its own. Once `.venv` exists, this is enough:
 
 ```sh
 .venv/bin/python tests/check.py
@@ -148,8 +123,7 @@ The check builds the extension, compares its SHA-1 with `hashlib`, asks the CPU 
 
 ## Layout
 
-- `build_and_run.py` creates `.venv`, installs the package, and starts a search
-- `imsovain/` builds the OpenPGP packets and drives the search
+- `imsovain/` builds the OpenPGP packets, prepares `.venv` on a fresh checkout, and drives the search
 - `accel/search.c` is the CPU SHA-1 scan
 - `accel/opencl.c` is the same scan on an OpenCL GPU
 - `accel/filter.c` matches key-id prefixes without a regex

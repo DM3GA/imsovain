@@ -391,6 +391,21 @@ def test_secret_mode(work: Path) -> None:
     require(mode == 0o600, f"secret key mode was {mode:04o}")
 
 
+def test_bootstrap_help() -> None:
+    system = Path("/usr/bin/python3")
+    require(system.is_file(), "system python is missing")
+    completed = subprocess.run(
+        [str(system), "-m", "imsovain", "--help"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    require(completed.returncode == 0, completed.stderr)
+    require("--uid" in completed.stdout and "--opencl" in completed.stdout, completed.stdout)
+    require("Traceback" not in completed.stderr, completed.stderr)
+
+
 def test_help() -> None:
     completed = subprocess.run(
         [sys.executable, "-m", "imsovain", "--help"],
@@ -564,6 +579,7 @@ def main() -> None:
     test_secret_mode(work)
     test_search_agrees()
     test_opencl()
+    test_bootstrap_help()
     test_help()
     test_cli_key(work)
     test_cli_filter(work)
