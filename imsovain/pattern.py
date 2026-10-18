@@ -175,12 +175,14 @@ def _hex_prefix(text: str) -> bytes | None:
     return bytes.fromhex(text)
 
 
-def parse_filter(text: str, leading: int = 6) -> Filter:
+def parse_filter(text: str, leading: int | None = None) -> Filter:
     raw = _compact(text)
     if raw.lower().startswith("0x"):
         raw = raw[2:]
     key = ALIASES.get(raw.lower(), raw.lower()).lower()
     if key == "repeat":
+        if leading is None:
+            raise ValueError("repeat needs a leading length from 1 to 8")
         return repeat(leading)
     preset = PRESETS.get(key)
     if preset is not None:

@@ -43,7 +43,7 @@ def _report(result) -> None:
     "--max-time-days",
     "-m",
     type=click.IntRange(1, None),
-    default=250,
+    default=365,
     show_default=True,
     help="How far before now the creation time may move, in days.",
 )
@@ -51,9 +51,8 @@ def _report(result) -> None:
     "--leading",
     "-l",
     type=click.IntRange(1, 8),
-    default=6,
-    show_default=True,
-    help="Repeat filter only: identical doubled-nibble bytes at the start of the key id.",
+    default=None,
+    help="Repeat filter only: how many identical doubled-nibble bytes the key id must open with. Required for repeat.",
 )
 @click.option(
     "--filter",
@@ -89,7 +88,7 @@ def main(
     threads: int,
     outdir: str,
     max_time_days: int,
-    leading: int,
+    leading: int | None,
     filter_name: str,
     uid: str,
     exit_after_found: bool,
@@ -103,7 +102,8 @@ def main(
     try:
         filt = parse_filter(filter_name, leading)
     except ValueError as exc:
-        raise click.BadParameter(str(exc), param_hint="--filter") from exc
+        hint = "--leading" if "leading" in str(exc) else "--filter"
+        raise click.BadParameter(str(exc), param_hint=hint) from exc
     try:
         max_iter = window_seconds(max_time_days)
     except ValueError as exc:

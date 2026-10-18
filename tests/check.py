@@ -132,7 +132,7 @@ def test_filters() -> None:
     coffee = parse_filter("coffee")
     counted = parse_filter("0x0011_2233")
     require(parse_filter("C0 DE").prefixes == (bytes.fromhex("c0de"),), "hex spacing was not accepted")
-    for bad in ("nope", "ABC", "0xGG", "", "123"):
+    for bad in ("nope", "ABC", "0xGG", "", "123", "repeat", "repeats"):
         try:
             parse_filter(bad)
         except ValueError:
@@ -362,8 +362,18 @@ def test_cli_rejects(work: Path) -> None:
     require(empty.returncode != 0, "empty user id was accepted")
     require("Traceback" not in empty.stderr, empty.stderr)
     require("user id" in empty.stderr, empty.stderr)
+    missing_leading = subprocess.run(
+        [sys.executable, "-m", "imsovain", "-u", UID, "-o", str(outdir)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    require(missing_leading.returncode != 0, "repeat without --leading was accepted")
+    require("Traceback" not in missing_leading.stderr, missing_leading.stderr)
+    require("leading" in missing_leading.stderr, missing_leading.stderr)
     huge = subprocess.run(
-        [sys.executable, "-m", "imsovain", "-u", UID, "-m", "49711", "-o", str(outdir)],
+        [sys.executable, "-m", "imsovain", "-u", UID, "-l", "1", "-m", "49711", "-o", str(outdir)],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -418,6 +428,8 @@ def test_help() -> None:
     require("--filter" in completed.stdout and "00112233" in completed.stdout, completed.stdout)
     require("C0DE" in completed.stdout, completed.stdout)
     require("--opencl" in completed.stdout, completed.stdout)
+    require("365" in completed.stdout, completed.stdout)
+    require("default: 6" not in completed.stdout, completed.stdout)
 
 
 def test_bench(work: Path) -> None:

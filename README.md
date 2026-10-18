@@ -6,7 +6,7 @@ A v4 fingerprint is the SHA-1 of the public-key packet, prefixed with `0x99` and
 
 The key id is the last eight bytes of the fingerprint. A key id of `0000000000000000` is skipped and the search continues. OpenPGP uses that value as a wildcard, so it does not name one key.
 
-A wider search window does not make a match more likely per hash. Each timestamp is one SHA-1. The window only decides how many timestamps are tried before the program draws a new key. The default window is 250 days. The largest window that fits in the four-byte timestamp is 49710 days, and a larger value is rejected.
+A wider search window does not make a match more likely per hash. Each timestamp is one SHA-1. The window only decides how many timestamps are tried before the program draws a new key. The default window is 365 days, one year. The largest window that fits in the four-byte timestamp is 49710 days, and a larger value is rejected.
 
 ## Filters
 
@@ -14,14 +14,14 @@ A wider search window does not make a match more likely per hash. Each timestamp
 
 | filter | the key id opens with |
 | --- | --- |
-| `repeat` (default) | N copies of one doubled nibble: `00`, `11`, … or `FF`. `--leading` sets N and defaults to 6, so `FFFFFFFFFFFF…` |
+| `repeat` (default) | N copies of one doubled nibble: `00`, `11`, … or `FF`. `--leading` sets N and is required, so `-l 6` asks for `FFFFFFFFFFFF…` |
 | `run` | `00112233`, `01234567`, `89ABCDEF`, `FEDCBA98`, `33221100`, or `76543210` |
 | `word` | a four-byte word: `DEADBEEF`, `CAFEBABE`, `C0DEC0DE`, `DEADC0DE`, `C0DECAFE`, `FEE1DEAD`, `8BADF00D`, `BAADF00D`, `B16B00B5`, `F00DF00D`, `13371337`, `CAFED00D`, `D15EA5ED`, `ABADCAFE`, `DECAFBAD`, `FACEFEED`, `BAAAAAAD`, `C0CAC01A`, `BEEFC0DE`, `FACEB00C` |
 | `speak` | a three-byte word: `C0FFEE`, `DEC0DE`, `DEFACE`, `FACADE`, `DECADE`, `0FF1CE`, `BADA55`, `FA1AFE`, `10ADED`, `0B5E55`, `B00B1E`, `D00D1E`, `D00DAD`, `BEEFED`, `5EC0DE` |
 | `short` | a two-byte word: `C0DE`, `CAFE`, `DEAD`, `BEEF`, `F00D`, `FACE`, `1337`, `BAAD`, `D00D`, `FADE`, `B00B`, `BABE`, `C0FF`, `10AD`, `0BAD`, `5EED` |
 | hex, such as `C0DE` or `0x00112233` | exactly that prefix, 1 to 8 bytes |
 
-`--leading` applies only to `repeat`. Words in one filter are the same length, so a short prefix cannot hide a longer one. These names are accepted too: `repeats`, `count` and `sequence` for `run`, `words`, `shorts`, `code` for `C0DE`, `coffee` for `C0FFEE`, and `deadbeef` for `DEADBEEF`.
+`--leading` applies only to `repeat`, and a repeat without it is an error. Words in one filter are the same length, so a short prefix cannot hide a longer one. These names are accepted too: `repeats`, `count` and `sequence` for `run`, `words`, `shorts`, `code` for `C0DE`, `coffee` for `C0FFEE`, and `deadbeef` for `DEADBEEF`.
 
 There are 16 doubled nibbles, so a repeat of N bytes shows up once in `16 / 256^N` hashes. That is `2^(8N - 4)` hashes on average. The median wait is about 70% of the average. A miss is ordinary. After one average wait, about 37% of searches are still running.
 
@@ -41,7 +41,7 @@ The prefix table does not move the CPU rate. The one-shot digest call this repla
 
 `--opencl` runs the same scan on a GPU. The CPU scan stays the default. A missing GPU is an error, not a silent fallback. The GPU hashes the whole window it was given, and one GPU runs one scan at a time. Extra `-t` workers draw the next keys while a scan runs. They do not multiply the hash rate. The host expands the SHA-1 schedule once per key with the timestamp word set to zero. Only that word changes from one second to the next, and the GPU adds it back in.
 
-A 250-day window is 21.6 million hashes. On this GPU that is a few milliseconds, so the time is the hash rate above, not the window. Use a window of a few thousand days on a faster GPU so launch overhead stays small next to the hashing. That still does not change how many hashes a match takes.
+A 365-day window is 31.5 million hashes. On this GPU that is a few milliseconds, so the time is the hash rate above, not the window. Use a window of a few thousand days on a faster GPU so launch overhead stays small next to the hashing. That still does not change how many hashes a match takes.
 
 ## Keys that get written
 
@@ -74,13 +74,14 @@ From a fresh checkout:
 python3 -m imsovain \
     -t 32 \
     -u 'Name <name@example.com>' \
+    -l 6 \
     -o PGPKEYS \
     --opencl
 ```
 
 The first run creates `.venv` when it is missing, installs this tree, compiles the C extension, and starts the search. The same command reuses that environment afterward. `.venv/bin/imsovain` is the same program.
 
-`--uid` and `--outdir` are required. `--threads` defaults to the machine's CPU count, `--max-time-days` to 250, `--leading` to 6, and `--filter` to `repeat`. `--opencl` hashes on the GPU. The search runs until you interrupt it. `python3 -m imsovain --help` lists every flag.
+`--uid` and `--outdir` are required. `--filter repeat` also requires `--leading`. `--threads` defaults to the machine's CPU count, `--max-time-days` to 365, and `--filter` to `repeat`. `--opencl` hashes on the GPU. The search runs until you interrupt it. `python3 -m imsovain --help` lists every flag.
 
 Examples, all of them average waits on the machine above:
 
@@ -95,7 +96,7 @@ python3 -m imsovain -t 8 -u 'Name <name@example.com>' -f word -o PGPKEYS
 python3 -m imsovain -t 4 -u 'Name <name@example.com>' -m 7 -f C0DE -o PGPKEYS --opencl
 
 # Six-byte repeat on the GPU. Average about half an hour.
-python3 -m imsovain -t 32 -u 'Name <name@example.com>' -o PGPKEYS --opencl
+python3 -m imsovain -t 32 -u 'Name <name@example.com>' -l 6 -o PGPKEYS --opencl
 
 # The count 00112233, among the other runs, stopping at the first key.
 python3 -m imsovain -t 8 -u 'Name <name@example.com>' -m 60 -f run -o PGPKEYS --opencl -x
