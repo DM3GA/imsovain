@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
-import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
 import click
 
@@ -122,18 +121,15 @@ def main(
             while True:
                 while len(pending) < threads:
                     pending.add(pool.submit(attempt_key, *worker_args))
-                finished = {job for job in pending if job.done()}
+                finished, pending = wait(pending, timeout=0.05, return_when=FIRST_COMPLETED)
                 found = False
                 for job in finished:
                     result = job.result()
                     _report(result)
                     if result.fingerprint:
                         found = True
-                pending -= finished
                 if found and exit_after_found:
                     return
-                if pending:
-                    time.sleep(0.05)
         except KeyboardInterrupt:
             print("stopped", file=sys.stderr)
             sys.exit(130)
