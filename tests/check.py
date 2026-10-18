@@ -350,6 +350,47 @@ def test_cli_filter(work: Path) -> None:
         print(f"verified {key_path.name}")
 
 
+def test_cli_rejects(work: Path) -> None:
+    outdir = work / "rejected"
+    empty = subprocess.run(
+        [sys.executable, "-m", "imsovain", "-u", "", "-o", str(outdir)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    require(empty.returncode != 0, "empty user id was accepted")
+    require("Traceback" not in empty.stderr, empty.stderr)
+    require("user id" in empty.stderr, empty.stderr)
+    huge = subprocess.run(
+        [sys.executable, "-m", "imsovain", "-u", UID, "-m", "49711", "-o", str(outdir)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    require(huge.returncode != 0, "a window past four bytes was accepted")
+    require("Traceback" not in huge.stderr, huge.stderr)
+    require("four bytes" in huge.stderr, huge.stderr)
+    require(not outdir.exists(), "a rejected search created the output directory")
+
+
+def test_secret_mode(work: Path) -> None:
+    from imsovain.engine import attempt_key
+    from imsovain.pattern import parse_filter
+
+    outdir = work / "umask-keys"
+    outdir.mkdir()
+    previous = os.umask(0o077)
+    try:
+        result = attempt_key(str(outdir), UID, 86_400, parse_filter("repeat", 1))
+    finally:
+        os.umask(previous)
+    require(result.path is not None, "no key written under umask 077")
+    mode = stat.S_IMODE(os.stat(result.path).st_mode)
+    require(mode == 0o600, f"secret key mode was {mode:04o}")
+
+
 def test_help() -> None:
     completed = subprocess.run(
         [sys.executable, "-m", "imsovain", "--help"],
@@ -519,6 +560,8 @@ def main() -> None:
     test_sha1()
     test_mpi_and_packet(work)
     test_filters()
+    test_cli_rejects(work)
+    test_secret_mode(work)
     test_search_agrees()
     test_opencl()
     test_help()
@@ -527,6 +570,13 @@ def main() -> None:
     test_cli_opencl(work)
     test_bench(work)
     require(window_seconds(250) == 250 * 24 * 60 * 60, "250-day window changed")
+    require(window_seconds(49710) == 49710 * 24 * 60 * 60, "largest four-byte window changed")
+    try:
+        window_seconds(49711)
+    except ValueError:
+        pass
+    else:
+        raise SystemExit("a window past four bytes was accepted")
     shutil.rmtree(work)
     print("all checks passed")
 

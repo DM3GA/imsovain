@@ -6,7 +6,7 @@ A v4 fingerprint is the SHA-1 of the public-key packet, prefixed with `0x99` and
 
 The key id is the last eight bytes of the fingerprint. A key id of `0000000000000000` is skipped and the search continues. OpenPGP uses that value as a wildcard, so it does not name one key.
 
-A wider search window does not make a match more likely per hash. Each timestamp is one SHA-1. The window only decides how many timestamps are tried before the program draws a new key. The default window is 250 days. The largest window that fits in the four-byte timestamp is 49710 days.
+A wider search window does not make a match more likely per hash. Each timestamp is one SHA-1. The window only decides how many timestamps are tried before the program draws a new key. The default window is 250 days. The largest window that fits in the four-byte timestamp is 49710 days, and a larger value is rejected.
 
 ## Filters
 
@@ -45,7 +45,9 @@ A 250-day window is 21.6 million hashes. On this GPU that is a few milliseconds,
 
 ## Keys that get written
 
-Each file under `PGPKEYS/` is a transferable secret key: one certify-only primary, one user id, and a positive self-signature. There is no encryption subkey. The secret material is not passphrase-protected. The file mode is `0600`. The file name is the fingerprint.
+Each file under `PGPKEYS/` is a transferable secret key: one certify-only primary, one user id, and a positive self-signature. There is no encryption subkey. The secret material is not passphrase-protected. The file is created at mode `0600`. The file name is the fingerprint.
+
+The packets are the old format from RFC 4880. The primary key is version 4, algorithm 22, with the Ed25519 curve OID `1.3.6.1.4.1.11591.15.1`. The public point is the byte `0x40` followed by 32 bytes. That is the form GnuPG imports.
 
 Import one with GnuPG:
 

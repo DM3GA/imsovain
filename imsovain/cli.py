@@ -96,14 +96,20 @@ def main(
     opencl: bool,
 ) -> None:
     """Search creation timestamps until an Ed25519 fingerprint matches."""
-    user_id_bytes(uid)
+    try:
+        user_id_bytes(uid)
+    except ValueError as exc:
+        raise click.BadParameter(str(exc), param_hint="--uid") from exc
     try:
         filt = parse_filter(filter_name, leading)
     except ValueError as exc:
         raise click.BadParameter(str(exc), param_hint="--filter") from exc
+    try:
+        max_iter = window_seconds(max_time_days)
+    except ValueError as exc:
+        raise click.BadParameter(str(exc), param_hint="--max-time-days") from exc
     outdir = os.path.abspath(outdir)
     os.makedirs(outdir, exist_ok=True)
-    max_iter = window_seconds(max_time_days)
     if opencl:
         from imsovain.accel_proc import opencl_device
 

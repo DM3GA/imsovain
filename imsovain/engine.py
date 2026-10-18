@@ -36,6 +36,28 @@ def window_seconds(days: int) -> int:
     return seconds
 
 
+def _write_secret(path: str, blob: bytes) -> None:
+    """Create an unencrypted secret key at mode 0600.
+
+    open() applies the umask, so a following fchmod is what keeps the mode
+    when the umask is more restrictive than 0600. A failed write removes the
+    partial file.
+    """
+    fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    try:
+        os.fchmod(fd, 0o600)
+    except Exception:
+        os.close(fd)
+        os.unlink(path)
+        raise
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(blob)
+    except Exception:
+        os.unlink(path)
+        raise
+
+
 def attempt_key(outdir: str, user_id: str, max_iter: int, filt: Filter, opencl: bool = False) -> Attempt:
     started = time.perf_counter()
     key = Ed25519Key(os.urandom(32))
@@ -58,9 +80,7 @@ def attempt_key(outdir: str, user_id: str, max_iter: int, filt: Filter, opencl: 
     text = format_fingerprint(fingerprint)
     path = os.path.join(outdir, text)
     blob = transferable_secret_key(placed, user_id)
-    with open(path, "xb") as handle:
-        handle.write(blob)
-    os.chmod(path, 0o600)
+    _write_secret(path, blob)
     return Attempt(
         checked=checked,
         seconds=elapsed,

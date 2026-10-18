@@ -85,11 +85,14 @@ def ensure_venv() -> Path:
 
 
 def install(python: Path) -> None:
-    subprocess.run(
-        [str(python), "-m", "pip", "install", "-e", str(ROOT)],
-        check=True,
-        cwd=ROOT,
-    )
+    try:
+        subprocess.run(
+            [str(python), "-m", "pip", "install", "-e", str(ROOT)],
+            check=True,
+            cwd=ROOT,
+        )
+    except subprocess.CalledProcessError:
+        fail(f"could not install {ROOT} into {python}")
 
 
 def main() -> None:

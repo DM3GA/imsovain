@@ -8,6 +8,16 @@ version = "0.1.0"
 description = "Vanity OpenPGP v4 Ed25519 key generator"
 readme = "README.md"
 requires-python = ">=3.9"
+authors = [
+    { name = "Michael DM3GA", email = "dev@dm3ga.info" },
+]
+keywords = ["openpgp", "pgp", "ed25519", "vanity", "fingerprint"]
+classifiers = [
+    "Environment :: Console",
+    "Programming Language :: C",
+    "Programming Language :: Python :: 3",
+    "Topic :: Security :: Cryptography",
+]
 dependencies = [
     "click>=8",
     "pynacl>=1.5",
