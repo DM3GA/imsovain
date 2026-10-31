@@ -6,7 +6,7 @@ A v4 fingerprint is the SHA-1 of the public-key packet, prefixed with `0x99` and
 
 The key id is the last eight bytes of the fingerprint. A key id of `0000000000000000` is skipped and the search continues. OpenPGP uses that value as a wildcard, so it does not name one key.
 
-A wider search window does not make a match more likely per hash. Each timestamp is one SHA-1. The window only decides how many timestamps are tried before the program draws a new key. The default window is 365 days, one year. The largest window that fits in the four-byte timestamp is 49710 days, and a larger value is rejected.
+A wider search window does not make a match more likely per hash. Each timestamp is one SHA-1. The window only decides how many timestamps are tried before the program draws a new key. The default window is 365 days, one year. The largest window that fits in the four-byte timestamp is 49710 days, and a larger value is rejected. The scan also stops at 1 January 1970, which is about 20750 days back today, so a longer window tries no more timestamps.
 
 ## Filters
 
@@ -21,9 +21,9 @@ A wider search window does not make a match more likely per hash. Each timestamp
 | `short` | a two-byte word: `C0DE`, `CAFE`, `DEAD`, `BEEF`, `F00D`, `FACE`, `1337`, `BAAD`, `D00D`, `FADE`, `B00B`, `BABE`, `C0FF`, `10AD`, `0BAD`, `5EED` |
 | hex, such as `C0DE` or `0x00112233` | exactly that prefix, 1 to 8 bytes |
 
-`--leading` applies only to `repeat`, and a repeat without it is an error. Words in one filter are the same length, so a short prefix cannot hide a longer one. These names are accepted too: `repeats`, `count` and `sequence` for `run`, `words`, `shorts`, `code` for `C0DE`, `coffee` for `C0FFEE`, and `deadbeef` for `DEADBEEF`.
+`--leading` applies only to `repeat`, and a repeat without it is an error. Words in one filter are the same length, so a short prefix cannot hide a longer one. These names are accepted too: `repeats` for `repeat`, `count` and `sequence` for `run`, `words` for `word`, `shorts` for `short`, `code` for `C0DE`, `coffee` for `C0FFEE`, and `deadbeef` for `DEADBEEF`.
 
-There are 16 doubled nibbles, so a repeat of N bytes shows up once in `16 / 256^N` hashes. That is `2^(8N - 4)` hashes on average. The median wait is about 70% of the average. A miss is ordinary. After one average wait, about 37% of searches are still running.
+There are 16 doubled nibbles, so one hash matches a repeat of N bytes with probability `16 / 256^N`. That is `2^(8N - 4)` hashes on average. The median wait is about 70% of the average. A miss is ordinary. After one average wait, about 37% of searches are still running.
 
 ## How long a repeat takes
 
@@ -45,7 +45,7 @@ A 365-day window is 31.5 million hashes. On this GPU that is a few milliseconds,
 
 ## Keys that get written
 
-Each file under `PGPKEYS/` is a transferable secret key: one certify-only primary, one user id, and a positive self-signature. There is no encryption subkey. The secret material is not passphrase-protected. The file is created at mode `0600`. The file name is the fingerprint.
+Each file under `PGPKEYS/` is a transferable secret key: one certify-only primary, one user id, and a positive self-signature. There is no encryption subkey. The secret material is not passphrase-protected. The file is created at mode `0600`, and a key directory the program creates is mode `0700`. The file name is the fingerprint.
 
 The packets are the old format from RFC 4880. The primary key is version 4, algorithm 22, with the Ed25519 curve OID `1.3.6.1.4.1.11591.15.1`. The public point is the byte `0x40` followed by 32 bytes. That is the form GnuPG imports.
 
@@ -102,7 +102,7 @@ python3 -m imsovain -t 32 -u 'Name <name@example.com>' -l 6 -o PGPKEYS --opencl
 python3 -m imsovain -t 8 -u 'Name <name@example.com>' -m 60 -f run -o PGPKEYS --opencl -x
 ```
 
-`-x` stops after one written key. Without it the program keeps going. `-f run` looks for `00112233` and the other counts. `-f coffee` looks for `C0FFEE`.
+`-x` stops once a key is written. Searches already running still finish, so one of them can write a second key, and every written key is reported. Without `-x` the program keeps going. `-f run` looks for `00112233` and the other counts. `-f coffee` looks for `C0FFEE`.
 
 Each CPU scan keeps its own SHA-1 context and releases the GIL while it hashes. The GPU call releases the GIL too, then takes one process-wide lock so the OpenCL queue is used by one scan at a time. A returned timestamp is checked again in Python before the key is written.
 
@@ -120,7 +120,7 @@ A search creates that environment on its own. Once `.venv` exists, this is enoug
 .venv/bin/python tests/check.py
 ```
 
-The check builds the extension, compares its SHA-1 with `hashlib`, asks the CPU and the GPU for the same hit hashlib found, imports a fixed test key into a temporary GnuPG home, generates a `repeat` key and a `C0DE` key on each path, and prints how the byte filter compares with `regexec`.
+The check builds the extension, compares its SHA-1 with `hashlib`, asks the CPU and the GPU for the same hit hashlib found, imports a fixed test key into a temporary GnuPG home, generates a `repeat` key and a `C0DE` key on each path, and prints how the byte filter compares with `regexec`. Without an OpenCL GPU it skips the GPU checks and says so. It also needs GnuPG and a C compiler (`$CC`, or `cc`), and it builds the extension with warnings as errors (`IMSOVAIN_WERROR`), which a plain `pip install` leaves off.
 
 ## Layout
 

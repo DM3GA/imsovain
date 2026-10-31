@@ -26,10 +26,6 @@ def _is_checkout() -> bool:
     return (ROOT / "pyproject.toml").is_file() and (ROOT / "accel" / "search.c").is_file()
 
 
-def _in_project_venv() -> bool:
-    return Path(sys.prefix).resolve() == VENV.resolve()
-
-
 def _extension_imports(python: Path) -> bool:
     completed = subprocess.run(
         [str(python), "-c", "import imsovain._accel"],
@@ -81,7 +77,9 @@ def _reexec(python: Path, *, installed: bool) -> None:
 
 def main() -> None:
     """Create the checkout environment when needed, then search."""
-    if not _is_checkout() or (_in_project_venv() and _extension_imports_here()):
+    # Any environment that already loads the extension can search, so an
+    # editable install in another virtualenv does not build a second one.
+    if not _is_checkout() or _extension_imports_here():
         from imsovain.cli import main as search
 
         search()

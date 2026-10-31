@@ -176,10 +176,8 @@ def _hex_prefix(text: str) -> bytes | None:
 
 
 def parse_filter(text: str, leading: int | None = None) -> Filter:
-    raw = _compact(text)
-    if raw.lower().startswith("0x"):
-        raw = raw[2:]
-    key = ALIASES.get(raw.lower(), raw.lower()).lower()
+    raw = _compact(text).lower()
+    key = ALIASES.get(raw, raw).lower()
     if key == "repeat":
         if leading is None:
             raise ValueError("repeat needs a leading length from 1 to 8")
@@ -187,14 +185,11 @@ def parse_filter(text: str, leading: int | None = None) -> Filter:
     preset = PRESETS.get(key)
     if preset is not None:
         return Filter(name=key, kind="prefix", prefixes=preset)
-    prefix = _hex_prefix(key)
+    # 0x belongs to a hex prefix only, so 0xword is not the word preset.
+    prefix = _hex_prefix(key[2:] if key.startswith("0x") else key)
     if prefix is None:
         raise ValueError(
             "unknown filter. Use repeat, run, word, speak, short, "
             "or a hex prefix such as C0DE or 0x00112233"
         )
     return Filter(name=prefix.hex(), kind="prefix", prefixes=(prefix,))
-
-
-def key_id_matches(fingerprint: bytes, filt: Filter) -> bool:
-    return filt.matches(fingerprint)

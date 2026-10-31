@@ -30,6 +30,9 @@ typedef struct imsovain_filter {
 /* 0 when the blob is a filter this scanner can run. */
 int imsovain_filter_parse(const uint8_t *blob, size_t len, imsovain_filter *out);
 
+/* 1 when a parsed filter is one the scans accept. */
+int imsovain_filter_ok(const imsovain_filter *filter);
+
 /* 1 when the last eight bytes of a SHA-1 fingerprint match.
    An all-zero key id never matches. OpenPGP uses that value as a wildcard. */
 int imsovain_filter_match(const uint8_t hash[20], const imsovain_filter *filter);

@@ -13,7 +13,7 @@ from imsovain.packets import (
     format_fingerprint,
     transferable_secret_key,
 )
-from imsovain.pattern import Filter, key_id_matches
+from imsovain.pattern import Filter
 
 SECONDS_PER_DAY = 24 * 60 * 60
 
@@ -39,21 +39,18 @@ def window_seconds(days: int) -> int:
 def _write_secret(path: str, blob: bytes) -> None:
     """Create an unencrypted secret key at mode 0600.
 
-    open() applies the umask, so a following fchmod is what keeps the mode
-    when the umask is more restrictive than 0600. A failed write removes the
-    partial file.
+    O_EXCL refuses an existing file or symlink. open() applies the umask, so
+    the fchmod is what keeps 0600 when the umask is stricter. The key is
+    synced before this returns, and a failed write removes the partial file.
     """
-    fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-    try:
-        os.fchmod(fd, 0o600)
-    except Exception:
-        os.close(fd)
-        os.unlink(path)
-        raise
+    fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_CLOEXEC, 0o600)
     try:
         with os.fdopen(fd, "wb") as handle:
+            os.fchmod(handle.fileno(), 0o600)
             handle.write(blob)
-    except Exception:
+            handle.flush()
+            os.fsync(handle.fileno())
+    except BaseException:
         os.unlink(path)
         raise
 
@@ -74,7 +71,7 @@ def attempt_key(outdir: str, user_id: str, max_iter: int, filt: Filter, opencl: 
 
     placed = SecretKeyPacket(key, found)
     fingerprint = placed.fingerprint()
-    if not key_id_matches(fingerprint, filt):
+    if not filt.matches(fingerprint):
         raise RuntimeError("search timestamp does not produce the requested key id")
 
     text = format_fingerprint(fingerprint)

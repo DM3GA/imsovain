@@ -24,7 +24,18 @@ def require(condition: bool, message: str) -> None:
 
 
 def build_extension() -> None:
-    subprocess.run([sys.executable, "-m", "pip", "install", "-e", str(ROOT)], check=True)
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--config-settings=cmake.define.IMSOVAIN_WERROR=ON",
+            "-e",
+            str(ROOT),
+        ],
+        check=True,
+    )
 
 
 def gpg_import(home: Path, key_path: Path) -> str:
@@ -132,7 +143,7 @@ def test_filters() -> None:
     coffee = parse_filter("coffee")
     counted = parse_filter("0x0011_2233")
     require(parse_filter("C0 DE").prefixes == (bytes.fromhex("c0de"),), "hex spacing was not accepted")
-    for bad in ("nope", "ABC", "0xGG", "", "123", "repeat", "repeats"):
+    for bad in ("nope", "ABC", "0xGG", "", "123", "repeat", "repeats", "0xword", "0xrepeat"):
         try:
             parse_filter(bad)
         except ValueError:
@@ -233,12 +244,22 @@ def assert_opencl_agrees(filt, found_at: int, key, start: int) -> None:
         require(missed_checked == found_at, f"OpenCL miss counted {missed_checked}")
 
 
-def test_opencl() -> None:
-    from imsovain.accel_proc import opencl_device, search
+def opencl_device_or_none() -> str | None:
+    from imsovain.accel_proc import opencl_device
+
+    try:
+        return opencl_device()
+    except RuntimeError as exc:
+        print(f"skipping the OpenCL checks: {exc}")
+        return None
+
+
+def test_opencl(device: str) -> None:
+    from imsovain.accel_proc import search
     from imsovain.packets import Ed25519Key, SecretKeyPacket
     from imsovain.pattern import parse_filter
 
-    print(f"opencl device {opencl_device()}")
+    print(f"opencl device {device}")
     for _ in range(8):
         filt = parse_filter("repeat", 2)
         key, start, found_at = find_with_hashlib(filt, 200_000)
@@ -271,38 +292,40 @@ def test_opencl() -> None:
     print(f"opencl scan {checked / elapsed:.0f}/s over {checked} hashes in {elapsed:.3f}s")
 
 
-def test_cli_opencl(work: Path) -> None:
-    outdir = work / "opencl-keys"
-    command = [
-        sys.executable,
-        "-m",
-        "imsovain",
-        "-t",
-        "4",
-        "-m",
-        "3",
-        "-f",
-        "C0DE",
-        "-u",
-        UID,
-        "-x",
-        "--opencl",
-        "-o",
-        str(outdir),
-    ]
+def run_cli_keys(work: Path, name: str, args: list[str]) -> tuple[str, list[str]]:
+    """Run the generator with -x and check every key it wrote.
+
+    Searches that are still running when the first key turns up may write
+    more keys, so -x can leave several. Each one must have been reported.
+    Returns stdout and the fingerprints without separators.
+    """
+    outdir = work / f"{name}-keys"
+    command = [sys.executable, "-m", "imsovain", "-u", UID, "-x", "-o", str(outdir), *args]
     completed = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, check=False)
-    require(completed.returncode == 0, completed.stdout + completed.stderr)
-    require("opencl " in completed.stdout, completed.stdout + completed.stderr)
-    require("filter c0de: C0DE" in completed.stdout, completed.stdout)
+    output = completed.stdout + completed.stderr
+    require(completed.returncode == 0, output)
+    require(stat.S_IMODE(outdir.stat().st_mode) == 0o700, "key directory was not mode 0700")
     keys = sorted(outdir.iterdir())
-    require(len(keys) >= 1, "OpenCL C0DE filter wrote no key")
+    require(len(keys) >= 1, f"{name}: generator wrote no key")
+    reported = sorted(line.split()[1] for line in completed.stdout.splitlines() if line.startswith("found "))
+    require(reported == [key.name for key in keys], f"{name}: a written key was not reported\n{output}")
+    fingerprints = []
     for index, key_path in enumerate(keys):
         require(stat.S_IMODE(key_path.stat().st_mode) == 0o600, "secret key was not mode 0600")
         compact = key_path.name.replace("_", "")
-        require(compact[-16:-12] == "C0DE", f"key id does not open with C0DE: {key_path.name}")
-        listed = gpg_import(work / f"gnupg-opencl-{index}", key_path)
+        listed = gpg_import(work / f"gnupg-{name}-{index}", key_path)
         require(listed == compact, "saved filename does not match the GnuPG fingerprint")
         print(f"verified {key_path.name}")
+        fingerprints.append(compact)
+    return completed.stdout, fingerprints
+
+
+def test_cli_opencl(work: Path) -> None:
+    stdout, fingerprints = run_cli_keys(work, "opencl", ["-t", "4", "-m", "3", "-f", "C0DE", "--opencl"])
+    require("opencl " in stdout, stdout)
+    require("filter c0de: C0DE" in stdout, stdout)
+    for compact in fingerprints:
+        require(compact[-16:-12] == "C0DE", f"key id does not open with C0DE: {compact}")
 
 
 def test_search_agrees() -> None:
@@ -317,37 +340,11 @@ def test_search_agrees() -> None:
 
 
 def test_cli_filter(work: Path) -> None:
-    outdir = work / "code-keys"
-    command = [
-        sys.executable,
-        "-m",
-        "imsovain",
-        "-t",
-        "4",
-        "-m",
-        "2",
-        "-l",
-        "6",
-        "-f",
-        "C0DE",
-        "-u",
-        UID,
-        "-x",
-        "-o",
-        str(outdir),
-    ]
-    completed = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, check=False)
-    require(completed.returncode == 0, completed.stdout + completed.stderr)
-    require("filter c0de: C0DE" in completed.stdout, completed.stdout)
-    keys = sorted(outdir.iterdir())
-    require(len(keys) >= 1, "C0DE filter wrote no key")
-    for index, key_path in enumerate(keys):
-        require(stat.S_IMODE(key_path.stat().st_mode) == 0o600, "secret key was not mode 0600")
-        compact = key_path.name.replace("_", "")
-        require(compact[-16:-12] == "C0DE", f"key id does not open with C0DE: {key_path.name}")
-        listed = gpg_import(work / f"gnupg-code-{index}", key_path)
-        require(listed == compact, "saved filename does not match the GnuPG fingerprint")
-        print(f"verified {key_path.name}")
+    # --leading is ignored outside repeat, so this is a plain C0DE search.
+    stdout, fingerprints = run_cli_keys(work, "code", ["-t", "4", "-m", "2", "-l", "6", "-f", "C0DE"])
+    require("filter c0de: C0DE" in stdout, stdout)
+    for compact in fingerprints:
+        require(compact[-16:-12] == "C0DE", f"key id does not open with C0DE: {compact}")
 
 
 def test_cli_rejects(work: Path) -> None:
@@ -391,21 +388,28 @@ def test_secret_mode(work: Path) -> None:
 
     outdir = work / "umask-keys"
     outdir.mkdir()
-    previous = os.umask(0o077)
+    # 0277 would leave open() at 0400, so this checks the fchmod.
+    previous = os.umask(0o277)
     try:
         result = attempt_key(str(outdir), UID, 86_400, parse_filter("repeat", 1))
     finally:
         os.umask(previous)
-    require(result.path is not None, "no key written under umask 077")
+    require(result.path is not None, "no key written under umask 0277")
     mode = stat.S_IMODE(os.stat(result.path).st_mode)
     require(mode == 0o600, f"secret key mode was {mode:04o}")
 
 
 def test_bootstrap_help() -> None:
-    system = Path("/usr/bin/python3")
-    require(system.is_file(), "system python is missing")
+    # The interpreter this virtualenv was made from has no editable install,
+    # so `-m imsovain` goes through the bootstrap into .venv.
+    version = f"python{sys.version_info.major}.{sys.version_info.minor}"
+    candidates = [Path(sys.base_prefix) / "bin" / name for name in (version, "python3")]
+    base = next((path for path in candidates if path.is_file()), None)
+    if base is None or Path(sys.prefix).resolve() == Path(sys.base_prefix).resolve():
+        print("skipping the bootstrap check: no base interpreter outside a virtualenv")
+        return
     completed = subprocess.run(
-        [str(system), "-m", "imsovain", "--help"],
+        [str(base), "-m", "imsovain", "--help"],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -452,7 +456,7 @@ def test_bench(work: Path) -> None:
     binary = work / "bench_filter"
     build = subprocess.run(
         [
-            "gcc",
+            os.environ.get("CC", "cc"),
             "-O3",
             "-std=c11",
             "-Wall",
@@ -537,36 +541,10 @@ def test_bench(work: Path) -> None:
 
 
 def test_cli_key(work: Path) -> None:
-    outdir = work / "keys"
-    command = [
-        sys.executable,
-        "-m",
-        "imsovain",
-        "-t",
-        "4",
-        "-m",
-        "20",
-        "-l",
-        "3",
-        "-u",
-        UID,
-        "-x",
-        "-o",
-        str(outdir),
-    ]
-    completed = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, check=False)
-    require(completed.returncode == 0, completed.stdout + completed.stderr)
-    keys = sorted(outdir.iterdir())
-    require(len(keys) >= 1, "generator wrote no key")
-    for index, key_path in enumerate(keys):
-        require(stat.S_IMODE(key_path.stat().st_mode) == 0o600, "secret key was not mode 0600")
-        compact = key_path.name.replace("_", "")
-        require(len(set(compact[-16:-10])) == 1, f"key id does not open with three matching bytes: {key_path.name}")
-        home = work / f"gnupg-cli-{index}"
-        listed = gpg_import(home, key_path)
-        require(listed == compact, "saved filename does not match the GnuPG fingerprint")
-        print(f"verified {key_path.name}")
-    print(completed.stdout.strip())
+    stdout, fingerprints = run_cli_keys(work, "repeat", ["-t", "4", "-m", "20", "-l", "3"])
+    for compact in fingerprints:
+        require(len(set(compact[-16:-10])) == 1, f"key id does not open with three matching bytes: {compact}")
+    print(stdout.strip())
 
 
 def main() -> None:
@@ -590,12 +568,15 @@ def main() -> None:
     test_cli_rejects(work)
     test_secret_mode(work)
     test_search_agrees()
-    test_opencl()
+    device = opencl_device_or_none()
+    if device is not None:
+        test_opencl(device)
     test_bootstrap_help()
     test_help()
     test_cli_key(work)
     test_cli_filter(work)
-    test_cli_opencl(work)
+    if device is not None:
+        test_cli_opencl(work)
     test_bench(work)
     require(window_seconds(250) == 250 * 24 * 60 * 60, "250-day window changed")
     require(window_seconds(49710) == 49710 * 24 * 60 * 60, "largest four-byte window changed")
@@ -606,7 +587,7 @@ def main() -> None:
     else:
         raise SystemExit("a window past four bytes was accepted")
     shutil.rmtree(work)
-    print("all checks passed")
+    print("all checks passed" if device is not None else "all checks passed, without OpenCL")
 
 
 if __name__ == "__main__":

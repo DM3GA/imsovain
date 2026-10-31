@@ -73,6 +73,7 @@ typedef cl_int (*cl_enqueue_ndrange_fn)(cl_command_queue, cl_kernel, cl_uint, co
 typedef cl_int (*cl_enqueue_read_fn)(cl_command_queue, cl_mem, cl_uint, size_t, size_t, void *, cl_uint,
                                      const void *, void *);
 typedef cl_int (*cl_get_kernel_wg_fn)(cl_kernel, cl_device_id, cl_uint, size_t, void *, size_t *);
+typedef cl_int (*cl_finish_fn)(cl_command_queue);
 typedef cl_int (*cl_release_mem_fn)(cl_mem);
 typedef cl_int (*cl_release_kernel_fn)(cl_kernel);
 typedef cl_int (*cl_release_program_fn)(cl_program);
@@ -97,6 +98,7 @@ static struct {
     cl_enqueue_ndrange_fn EnqueueNDRangeKernel;
     cl_enqueue_read_fn EnqueueReadBuffer;
     cl_get_kernel_wg_fn GetKernelWorkGroupInfo;
+    cl_finish_fn Finish;
     cl_release_mem_fn ReleaseMemObject;
     cl_release_kernel_fn ReleaseKernel;
     cl_release_program_fn ReleaseProgram;
@@ -838,6 +840,9 @@ static int set_u32(cl_kernel kernel, cl_uint index, uint32_t value) {
     return 0;
 }
 
+/* The write does not block. src must stay valid until the queue drains: the
+   blocking read at the end of a launch does that, and every early return
+   after a write goes through drain_queue() first. */
 static int write_buf(cl_mem mem, const void *src, size_t bytes) {
     cl_int err = ocl.EnqueueWriteBuffer(gpu.queue, mem, 0, 0, bytes, src, 0, NULL, NULL);
     if (err != 0) {
@@ -845,6 +850,13 @@ static int write_buf(cl_mem mem, const void *src, size_t bytes) {
         return -1;
     }
     return 0;
+}
+
+/* Wait for queued writes before their stack buffers go out of scope. */
+static void drain_queue(void) {
+    if (gpu.queue != NULL) {
+        ocl.Finish(gpu.queue);
+    }
 }
 
 static int self_test_message(const uint8_t *msg, size_t len, const char *label) {
@@ -865,6 +877,7 @@ static int self_test_message(const uint8_t *msg, size_t len, const char *label) 
     }
     if (write_buf(gpu.words, prep, sizeof prep) != 0 || set_mem(gpu.self, 0, gpu.words) != 0 ||
         set_mem(gpu.self, 1, out) != 0) {
+        drain_queue();
         ocl.ReleaseMemObject(out);
         fail_init(thread_error);
         return -1;
@@ -872,11 +885,15 @@ static int self_test_message(const uint8_t *msg, size_t len, const char *label) 
     size_t one = 1;
     err = ocl.EnqueueNDRangeKernel(gpu.queue, gpu.self, 1, NULL, &one, &one, 0, NULL, NULL);
     if (err != 0) {
+        drain_queue();
         ocl.ReleaseMemObject(out);
         fail_init_code("OpenCL SHA-1 self-test launch", err);
         return -1;
     }
     err = ocl.EnqueueReadBuffer(gpu.queue, out, 1, 0, sizeof got, got, 0, NULL, NULL);
+    if (err != 0) {
+        drain_queue();
+    }
     ocl.ReleaseMemObject(out);
     if (err != 0) {
         fail_init_code("OpenCL SHA-1 self-test read", err);
@@ -982,6 +999,7 @@ static int init_gpu(void) {
         load_sym(&ocl.EnqueueNDRangeKernel, "clEnqueueNDRangeKernel", 0) != 0 ||
         load_sym(&ocl.EnqueueReadBuffer, "clEnqueueReadBuffer", 0) != 0 ||
         load_sym(&ocl.GetKernelWorkGroupInfo, "clGetKernelWorkGroupInfo", 0) != 0 ||
+        load_sym(&ocl.Finish, "clFinish", 0) != 0 ||
         load_sym(&ocl.ReleaseMemObject, "clReleaseMemObject", 0) != 0 ||
         load_sym(&ocl.ReleaseKernel, "clReleaseKernel", 0) != 0 ||
         load_sym(&ocl.ReleaseProgram, "clReleaseProgram", 0) != 0 ||
@@ -1160,16 +1178,6 @@ static int ensure_gpu(void) {
     return 0;
 }
 
-static int filter_ok(const imsovain_filter *filter) {
-    if (filter == NULL) {
-        return 0;
-    }
-    if (filter->kind == IMSOVAIN_FILTER_REPEAT) {
-        return filter->leading >= 1 && filter->leading <= 8;
-    }
-    return filter->kind == IMSOVAIN_FILTER_PREFIX && filter->count >= 1 && filter->count <= IMSOVAIN_FILTER_MAX;
-}
-
 static size_t launch_threads(uint32_t limit) {
     size_t local = gpu.local < 1 ? 1 : gpu.local;
     size_t need = ((size_t)limit + 3u) / 4u;
@@ -1195,7 +1203,7 @@ static int64_t launch_scan(const uint8_t *src, size_t len, uint32_t max_iter, co
         copy_error("OpenCL search hashes one SHA-1 block, and this preimage is longer than 55 bytes");
         return -2;
     }
-    if (src == NULL || len < 8 || !filter_ok(filter) || max_iter == 0) {
+    if (src == NULL || len < 8 || !imsovain_filter_ok(filter) || max_iter == 0) {
         copy_error("OpenCL search arguments are not valid");
         return -2;
     }
@@ -1230,22 +1238,20 @@ static int64_t launch_scan(const uint8_t *src, size_t len, uint32_t max_iter, co
         }
     }
 
+    uint32_t sentinel = 0xffffffffu;
     if (write_buf(gpu.words, prep, sizeof prep) != 0 ||
         write_buf(gpu.prefix_len, plen, sizeof plen) != 0 ||
         write_buf(gpu.prefix_hi, phi, sizeof phi) != 0 ||
-        write_buf(gpu.prefix_lo, plo, sizeof plo) != 0) {
-        return -2;
-    }
-    uint32_t sentinel = 0xffffffffu;
-    if (write_buf(gpu.hit, &sentinel, sizeof sentinel) != 0) {
-        return -2;
+        write_buf(gpu.prefix_lo, plo, sizeof plo) != 0 ||
+        write_buf(gpu.hit, &sentinel, sizeof sentinel) != 0) {
+        goto fail;
     }
     if (set_mem(gpu.scan, 0, gpu.words) != 0 || set_u32(gpu.scan, 1, limit) != 0 ||
         set_u32(gpu.scan, 2, filter->kind) != 0 || set_u32(gpu.scan, 3, filter->leading) != 0 ||
         set_u32(gpu.scan, 4, prefix_count) != 0 || set_mem(gpu.scan, 5, gpu.prefix_len) != 0 ||
         set_mem(gpu.scan, 6, gpu.prefix_hi) != 0 || set_mem(gpu.scan, 7, gpu.prefix_lo) != 0 ||
         set_mem(gpu.scan, 8, gpu.hit) != 0) {
-        return -2;
+        goto fail;
     }
 
     size_t local = gpu.local < 1 ? 1 : gpu.local;
@@ -1253,13 +1259,13 @@ static int64_t launch_scan(const uint8_t *src, size_t len, uint32_t max_iter, co
     cl_int err = ocl.EnqueueNDRangeKernel(gpu.queue, gpu.scan, 1, NULL, &global, &local, 0, NULL, NULL);
     if (err != 0) {
         fail_call("clEnqueueNDRangeKernel", err);
-        return -2;
+        goto fail;
     }
     uint32_t hit = sentinel;
     err = ocl.EnqueueReadBuffer(gpu.queue, gpu.hit, 1, 0, sizeof hit, &hit, 0, NULL, NULL);
     if (err != 0) {
         fail_call("clEnqueueReadBuffer", err);
-        return -2;
+        goto fail;
     }
     if (checked != NULL) {
         *checked = limit;
@@ -1275,6 +1281,10 @@ static int64_t launch_scan(const uint8_t *src, size_t len, uint32_t max_iter, co
         return -2;
     }
     return (int64_t)(start - hit);
+
+fail:
+    drain_queue();
+    return -2;
 }
 
 int64_t imsovain_opencl_search(const uint8_t *src, size_t len, size_t time_off, uint32_t max_iter,

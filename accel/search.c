@@ -56,17 +56,6 @@ static int sha1_reuse(EVP_MD_CTX *ctx, const uint8_t *data, size_t len, uint8_t 
     return out_len == 20 ? 0 : -1;
 }
 
-static int filter_ok(const imsovain_filter *filter) {
-    if (filter == NULL) {
-        return 0;
-    }
-    if (filter->kind == IMSOVAIN_FILTER_REPEAT) {
-        return filter->leading >= 1 && filter->leading <= 8;
-    }
-    return filter->kind == IMSOVAIN_FILTER_PREFIX && filter->count >= 1 &&
-           filter->count <= IMSOVAIN_FILTER_MAX;
-}
-
 /* stop_on_match: return the unix time, or -1 when the window misses.
    Otherwise return 0 after hashing the whole window. -2 is a hard failure.
 */
@@ -79,7 +68,7 @@ static int64_t scan_times(const uint8_t *src, size_t len, size_t time_off,
     if (matches != NULL) {
         *matches = 0;
     }
-    if (src == NULL || len < 4 || time_off > len - 4 || max_iter == 0 || !filter_ok(filter)) {
+    if (src == NULL || len < 4 || time_off > len - 4 || max_iter == 0 || !imsovain_filter_ok(filter)) {
         return -2;
     }
 
@@ -101,18 +90,16 @@ static int64_t scan_times(const uint8_t *src, size_t len, size_t time_off,
         limit = room > 0xffffffffu ? 0xffffffffu : (uint32_t)room;
     }
 
+    uint64_t done = 0;
     for (uint32_t i = 0; i < limit; i++) {
         uint32_t stamp = start - i;
         write_be32(buf + time_off, stamp);
         uint8_t hash[20];
         if (sha1_reuse(ctx, buf, len, hash) != 0) {
-            EVP_MD_CTX_free(ctx);
-            free(buf);
-            return -2;
+            found = -2;
+            break;
         }
-        if (checked != NULL) {
-            *checked = (uint64_t)i + 1;
-        }
+        done++;
         if (imsovain_filter_match(hash, filter)) {
             hits++;
             if (stop_on_match) {
@@ -122,15 +109,18 @@ static int64_t scan_times(const uint8_t *src, size_t len, size_t time_off,
         }
     }
 
+    if (checked != NULL) {
+        *checked = done;
+    }
     if (matches != NULL) {
         *matches = hits;
     }
     EVP_MD_CTX_free(ctx);
     free(buf);
-    if (!stop_on_match) {
-        return 0;
+    if (found == -2 || stop_on_match) {
+        return found;
     }
-    return found;
+    return 0;
 }
 
 int64_t imsovain_search(const uint8_t *src, size_t len, size_t time_off,

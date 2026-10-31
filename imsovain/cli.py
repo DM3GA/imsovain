@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
-from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, as_completed, wait
 
 import click
 
@@ -108,8 +108,6 @@ def main(
         max_iter = window_seconds(max_time_days)
     except ValueError as exc:
         raise click.BadParameter(str(exc), param_hint="--max-time-days") from exc
-    outdir = os.path.abspath(outdir)
-    os.makedirs(outdir, exist_ok=True)
     if opencl:
         from imsovain.accel_proc import opencl_device
 
@@ -118,24 +116,35 @@ def main(
         except RuntimeError as exc:
             raise click.ClickException(str(exc)) from exc
         print(f"opencl {device}", flush=True)
+    outdir = os.path.abspath(outdir)
+    # The keys are unencrypted. A new directory is private to its owner.
+    os.makedirs(outdir, mode=0o700, exist_ok=True)
     print(f"filter {describe(filt)}", flush=True)
     worker_args = (outdir, uid, max_iter, filt, opencl)
 
+    interrupted = False
     with ThreadPoolExecutor(max_workers=threads) as pool:
         pending = set()
         try:
             while True:
                 while len(pending) < threads:
                     pending.add(pool.submit(attempt_key, *worker_args))
-                finished, pending = wait(pending, timeout=0.05, return_when=FIRST_COMPLETED)
-                found = False
-                for job in finished:
-                    result = job.result()
+                finished, pending = wait(pending, return_when=FIRST_COMPLETED)
+                results = [job.result() for job in finished]
+                for result in results:
                     _report(result)
-                    if result.fingerprint:
-                        found = True
-                if found and exit_after_found:
-                    return
+                if exit_after_found and any(result.fingerprint for result in results):
+                    break
         except KeyboardInterrupt:
-            print("stopped", file=sys.stderr)
-            sys.exit(130)
+            interrupted = True
+            print("stopping once the running searches finish", file=sys.stderr, flush=True)
+        # A scan cannot be cancelled once it runs, and one that is still
+        # running may write a key. Report those keys too.
+        try:
+            for job in as_completed(pending):
+                _report(job.result())
+        except KeyboardInterrupt:
+            interrupted = True
+    if interrupted:
+        print("stopped", file=sys.stderr)
+        sys.exit(130)
